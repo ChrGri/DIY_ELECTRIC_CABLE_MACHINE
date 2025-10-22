@@ -33,7 +33,7 @@ Core Components
 | Servo Motor | StepperOnline A6 Servo | e.g., A6-750W or similar. Choose based on desired power. | [A6 1,27Nm](https://www.omc-stepperonline.com/de/a6-serie-400w-rs485-ac-servomotor-kit-3000rpm-1-27nm-17-bit-absolutwertgeber-ip67-a6-rs400h2a1-m17?tracking=6721c5865911c)
 | Potentiometer | 3 leg resistor | To control the resistance | |
 | Power Supply | Integrated 230V AC | | |
-| Gym Cable |3mm-5mm Steel or Dyneema | Dyneema cord is strong and flexible. | |
+| Gym Cable | 3mm Polyster cord x 30m | Polyster cord is strong. | [Polyster cord](https://amzn.to/49fXEY2) |
 | Handle | Standard D-Handle | Any cable machine attachment works. |  |
 
 ### Custom PCB
