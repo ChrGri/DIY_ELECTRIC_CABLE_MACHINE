@@ -22,15 +22,17 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 ## 🛠️ Bill of Materials (BOM)
 
 Core Components
-| Component | Model / Spec | Notes |
-|--|--|--|
-| Microcontroller | ESP32 Dev Board | Any ESP32-WROOM-32 board will work. |
-| Servo Motor | StepperOnline A6 Servo | e.g., A6-750W or similar. Choose based on desired power. | 
-| Servo Driver | Matching A6 Driver | This typically comes bundled with the motor. | 
-| Power Supply | Integrated 230V AC | |
-| Gym Cable |3mm-5mm Steel or Dyneema | Dyneema cord is strong and flexible. |
-| Handle | Standard D-Handle | Any cable machine attachment works. | 
+| Component | Model / Spec | Notes | (affiliate) link|
+|--|--|--|--|
+| Microcontroller | ESP32 Dev Board | Any ESP32-WROOM-32 board will work. | |
+| Servo Motor | StepperOnline A6 Servo | e.g., A6-750W or similar. Choose based on desired power. | [A6 1,27Nm](https://www.omc-stepperonline.com/de/a6-serie-400w-rs485-ac-servomotor-kit-3000rpm-1-27nm-17-bit-absolutwertgeber-ip67-a6-rs400h2a1-m17?tracking=6721c5865911c)
+| Potentiometer | 3 leg resistor | To control the resistance | |
+| Power Supply | Integrated 230V AC | | |
+| Gym Cable |3mm-5mm Steel or Dyneema | Dyneema cord is strong and flexible. | |
+| Handle | Standard D-Handle | Any cable machine attachment works. |  |
 
+### Custom PCB
+In the making.
 
 ### 3D Printed Parts
 
@@ -48,18 +50,12 @@ Warning: You are working with high-voltage AC (for the PSU) and high-current DC 
 
 (A simplified diagram. The A6 driver manual will have detailed pinouts for alarm, enable, and pulse/dir signals.)
 
-                 +-------------------+
-                 |  StepperOnline A6 |
-(from ESP32)     |   Servo Driver    |
-                 |                   |
-GPIO (Pulse) ---->| PUL+              |
-GPIO (Dir)   ---->| DIR+              |
-GPIO (Enable) --->| ENA+              |
-GND          ---->| PUL- / DIR- / ENA-|
-                 |                   |
-                 |     MOTOR (M)     |----> (To A6 Servo Motor)
-                 |     POWER (L1/L2) |----> (To 48V DC PSU)
-                 +-------------------+
+| from ESP32 | to A6 servo |
+|--|--|
+| GPIO 34 (Potentiometer in)  | None | 
+| GPIO 25 (DAC out) | Pin 20 |
+| GPIO 4 (Servo ON signal) | Pin 33 |
+| Gnd | Pin 19 & Pin 29 |
 
 
 ## 💾 Firmware Setup
