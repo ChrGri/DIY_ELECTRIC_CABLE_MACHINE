@@ -1,6 +1,6 @@
 # ESP32-Powered DIY Smart Cable Machine
 
-An open-source, smart digital resistance machine using an ESP32, a high-torque StepperOnline A6 servo, and 3D-printed components. Ditch the iron plates and build your own Tonal/Vitruvian-style trainer!
+An open-source, smart digital resistance machine using an ESP32, a high-torque StepperOnline A6 servo, and 3D-printed components. 
 
 <img width="748" height="993" alt="image" src="https://github.com/user-attachments/assets/911381d6-aee3-4775-b78f-ad645e522a1c" />
 
