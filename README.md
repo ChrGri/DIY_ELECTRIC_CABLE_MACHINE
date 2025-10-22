@@ -4,6 +4,10 @@ An open-source, smart digital resistance machine using an ESP32, a high-torque S
 
 <img width="748" height="993" alt="image" src="https://github.com/user-attachments/assets/911381d6-aee3-4775-b78f-ad645e522a1c" />
 
+<img width="1319" height="993" alt="image" src="https://github.com/user-attachments/assets/f03fdc0b-d693-4f28-ae2a-7654bda9b814" />
+
+
+
 # 🏋️ About The Project
 
 This project is a Do-It-Yourself (DIY) approach to modern smart gyms. Instead of using a traditional weight stack, this machine uses a powerful closed-loop servo motor (StepperOnline A6) controlled by an ESP32 to provide resistance. This allows for digitally adjustable weight, smooth operation, and the potential for advanced features like eccentric-only training, custom resistance curves, and workout tracking.
