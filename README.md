@@ -1,2 +1,173 @@
-# DIY_ELECTRIC_CABLE_MACHINE
-DIY Electric Gym Cable Machine
+ESP32-Powered DIY Smart Cable Machine
+
+An open-source, smart digital resistance machine using an ESP32, a high-torque StepperOnline A6 servo, and 3D-printed components. Ditch the iron plates and build your own Tonal/Vitruvian-style trainer!
+
+🏋️ About The Project
+
+This project is a Do-It-Yourself (DIY) approach to modern smart gyms. Instead of using a traditional weight stack, this machine uses a powerful closed-loop servo motor (StepperOnline A6) controlled by an ESP32 to provide resistance. This allows for digitally adjustable weight, smooth operation, and the potential for advanced features like eccentric-only training, custom resistance curves, and workout tracking.
+
+The core of the build relies on accessible components: the powerful ESP32, a reliable industrial servo, a standard gym cable/handle, and custom 3D-printed parts for the spool and mounting.
+
+✨ Key Features
+
+Digitally Adjustable Resistance: Change your "weight" from a web interface or physical buttons.
+
+High-Torque Servo: The StepperOnline A6 servo provides strong, smooth, and precise resistance.
+
+ESP32 Controller: Wi-Fi and Bluetooth-ready for a web UI, mobile app control, and OTA (Over-The-Air) updates.
+
+Fully Open-Source: All 3D models (STL/STEP) and firmware code are provided.
+
+Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
+
+Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
+
+🛠️ Bill of Materials (BOM)
+
+Core Components
+
+Component
+
+Model / Spec
+
+Notes
+
+Microcontroller
+
+ESP32 Dev Board
+
+Any ESP32-WROOM-32 board will work.
+
+Servo Motor
+
+StepperOnline A6 Servo
+
+e.g., A6-750W or similar. Choose based on desired power.
+
+Servo Driver
+
+Matching A6 Driver
+
+This typically comes bundled with the motor.
+
+Power Supply
+
+48V DC PSU
+
+Must meet the power requirements of your servo.
+
+Gym Cable
+
+3mm-5mm Steel or Dyneema
+
+Dyneema cord is strong and flexible.
+
+Handle
+
+Standard D-Handle
+
+Any cable machine attachment works.
+
+Pulleys
+
+(Optional)
+
+Needed for routing the cable.
+
+3D Printed Parts
+
+Main Spool (attaches to servo shaft)
+
+Motor Mount
+
+ESP32 Enclosure
+
+(Optional) Pulley mounts
+
+(All .stl and .step files are available in the /3D-Models directory of this repository)
+
+🔌 Wiring Diagram
+
+Here is the basic wiring schematic for connecting the ESP32 to the servo driver.
+
+Warning: You are working with high-voltage AC (for the PSU) and high-current DC (for the servo). Always double-check your connections and ensure everything is unplugged when wiring.
+
+(A simplified diagram. The A6 driver manual will have detailed pinouts for alarm, enable, and pulse/dir signals.)
+
+                 +-------------------+
+                 |  StepperOnline A6 |
+(from ESP32)     |   Servo Driver    |
+                 |                   |
+GPIO (Pulse) ---->| PUL+              |
+GPIO (Dir)   ---->| DIR+              |
+GPIO (Enable) --->| ENA+              |
+GND          ---->| PUL- / DIR- / ENA-|
+                 |                   |
+                 |     MOTOR (M)     |----> (To A6 Servo Motor)
+                 |     POWER (L1/L2) |----> (To 48V DC PSU)
+                 +-------------------+
+
+
+💾 Firmware Setup
+
+The firmware is written using the Arduino framework for the ESP32.
+
+IDE: Open this project in PlatformIO (recommended) or the Arduino IDE.
+
+Libraries: Install the required libraries (e.g., ESPAsyncWebServer, AccelStepper).
+
+Configuration:
+
+Copy src/config_template.h to src/config.h.
+
+Enter your Wi-Fi credentials in src/config.h.
+
+Adjust the STEP_PIN, DIR_PIN, and ENABLE_PIN to match your wiring.
+
+Calibrate STEPS_PER_REVOLUTION based on your driver's micro-stepping settings.
+
+Flash: Build and upload the firmware to your ESP32.
+
+🚀 How to Use
+
+Power On: Connect the power supply and turn on the system.
+
+Connect: The ESP32 will create a Wi-Fi network (or join yours, based on your config). Connect to its IP address from your phone or computer.
+
+Web Interface: You will see a simple web page.
+
+Set Weight: Enter your desired resistance (in kg or lbs) and press "Set".
+
+Work Out! The servo will engage and provide resistance as you pull the handle.
+
+📈 To-Do / Future Plans
+
+[ ] Add eccentric resistance mode (higher resistance on release).
+
+[ ] Implement a BLE (Bluetooth Low Energy) service for a mobile app.
+
+[ ] Add a load cell to measure force accurately and provide real-time feedback.
+
+[ ] Workout tracking and history.
+
+[ ] Add physical buttons/encoder to set weight without a phone.
+
+🤝 Contributing
+
+Pull requests are welcome! If you have ideas for improvements, new features, or bug fixes, please open an issue first to discuss what you would like to change.
+
+Fork the Project
+
+Create your Feature Branch (git checkout -b feature/AmazingFeature)
+
+Commit your Changes (git commit -m 'Add some AmazingFeature')
+
+Push to the Branch (git push origin feature/AmazingFeature)
+
+Open a Pull Request
+
+📄 License
+
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+Disclaimer: This is a DIY project involving high-torque motors and potentially heavy loads. Build and use at your own risk. The author is not responsible for any injury or damage.
