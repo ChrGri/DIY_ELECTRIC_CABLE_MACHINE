@@ -6,6 +6,7 @@ An open-source, smart digital resistance machine using an ESP32, a high-torque S
 
 <img width="1319" height="993" alt="image" src="https://github.com/user-attachments/assets/f03fdc0b-d693-4f28-ae2a-7654bda9b814" />
 
+<img width="1319" height="993" alt="image" src="Doc/Images/First_Usage.gif" />
 
 
 # 🏋️ About The Project
