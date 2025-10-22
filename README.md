@@ -1,20 +1,20 @@
-ESP32-Powered DIY Smart Cable Machine
+# ESP32-Powered DIY Smart Cable Machine
 
 An open-source, smart digital resistance machine using an ESP32, a high-torque StepperOnline A6 servo, and 3D-printed components. Ditch the iron plates and build your own Tonal/Vitruvian-style trainer!
 
-🏋️ About The Project
+# 🏋️ About The Project
 
 This project is a Do-It-Yourself (DIY) approach to modern smart gyms. Instead of using a traditional weight stack, this machine uses a powerful closed-loop servo motor (StepperOnline A6) controlled by an ESP32 to provide resistance. This allows for digitally adjustable weight, smooth operation, and the potential for advanced features like eccentric-only training, custom resistance curves, and workout tracking.
 
 The core of the build relies on accessible components: the powerful ESP32, a reliable industrial servo, a standard gym cable/handle, and custom 3D-printed parts for the spool and mounting.
 
-✨ Key Features
+## ✨ Key Features
 
 Digitally Adjustable Resistance: Change your "weight" from a web interface or physical buttons.
 
 High-Torque Servo: The StepperOnline A6 servo provides strong, smooth, and precise resistance.
 
-ESP32 Controller: Wi-Fi and Bluetooth-ready for a web UI, mobile app control, and OTA (Over-The-Air) updates.
+ESP32 Controller: Wi-Fi and Bluetooth-ready for a new UI, mobile app control, and OTA (Over-The-Air) updates.
 
 Fully Open-Source: All 3D models (STL/STEP) and firmware code are provided.
 
@@ -22,7 +22,7 @@ Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
 
 Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
 
-🛠️ Bill of Materials (BOM)
+## 🛠️ Bill of Materials (BOM)
 
 Core Components
 
@@ -74,7 +74,7 @@ Pulleys
 
 Needed for routing the cable.
 
-3D Printed Parts
+### 3D Printed Parts
 
 Main Spool (attaches to servo shaft)
 
@@ -86,7 +86,7 @@ ESP32 Enclosure
 
 (All .stl and .step files are available in the /3D-Models directory of this repository)
 
-🔌 Wiring Diagram
+## 🔌 Wiring Diagram
 
 Here is the basic wiring schematic for connecting the ESP32 to the servo driver.
 
@@ -108,7 +108,7 @@ GND          ---->| PUL- / DIR- / ENA-|
                  +-------------------+
 
 
-💾 Firmware Setup
+## 💾 Firmware Setup
 
 The firmware is written using the Arduino framework for the ESP32.
 
@@ -128,7 +128,7 @@ Calibrate STEPS_PER_REVOLUTION based on your driver's micro-stepping settings.
 
 Flash: Build and upload the firmware to your ESP32.
 
-🚀 How to Use
+## 🚀 How to Use
 
 Power On: Connect the power supply and turn on the system.
 
@@ -140,7 +140,7 @@ Set Weight: Enter your desired resistance (in kg or lbs) and press "Set".
 
 Work Out! The servo will engage and provide resistance as you pull the handle.
 
-📈 To-Do / Future Plans
+## 📈 To-Do / Future Plans
 
 [ ] Add eccentric resistance mode (higher resistance on release).
 
@@ -152,7 +152,7 @@ Work Out! The servo will engage and provide resistance as you pull the handle.
 
 [ ] Add physical buttons/encoder to set weight without a phone.
 
-🤝 Contributing
+## 🤝 Contributing
 
 Pull requests are welcome! If you have ideas for improvements, new features, or bug fixes, please open an issue first to discuss what you would like to change.
 
@@ -166,8 +166,20 @@ Push to the Branch (git push origin feature/AmazingFeature)
 
 Open a Pull Request
 
-📄 License
+## ⚠️ Safety Disclaimer ⚠️
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+Build and use this device at your own risk.
 
-Disclaimer: This is a DIY project involving high-torque motors and potentially heavy loads. Build and use at your own risk. The author is not responsible for any injury or damage.
+This is an advanced DIY project that involves:
+
+High-Voltage AC: You will be working with mains AC voltage for the power supply, which carries a risk of severe electric shock or death.
+
+Powerful Motor: The A6 servo motor is extremely powerful. It can cause serious injury if hands, hair, or clothing get caught in the spool or cable.
+
+High Tension: The machine operates under high tension. Failure of 3D-printed parts, the cable, or mountings can result in a sudden release of load, posing a significant risk of injury.
+
+The author(s) and contributors to this project assume no responsibility or liability for any injuries, damages, or losses resulting from the construction or use of this device. You are solely responsible for ensuring the safety of your build, performing all necessary safety checks, and using the machine in a safe manner.
+
+## 📄 License
+
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0). See the LICENSE file for details.
