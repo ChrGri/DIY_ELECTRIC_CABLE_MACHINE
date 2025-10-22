@@ -8,6 +8,8 @@ An open-source, smart digital resistance machine using an ESP32, a high-torque S
 
 <img width="1319" height="993" alt="image" src="Doc/Images/First_Usage.gif" />
 
+Action video, see [here](Doc/Videos/ActionVideo_1.mp4).
+
 
 # 🏋️ About The Project
 
@@ -61,6 +63,10 @@ Warning: You are working with high-voltage AC (for the PSU) and high-current DC 
 | GPIO 25 (DAC out) | Pin 20 |
 | GPIO 4 (Servo ON signal) | Pin 33 |
 | Gnd | Pin 19 & Pin 29 |
+
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/7df0e231-b9e5-4612-b3d2-d33201c116be" />
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/1ee3dc36-98e3-43b8-a27f-07aad9a8bf64" />
+
 
 
 ## 💾 Firmware Setup
