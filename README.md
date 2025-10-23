@@ -26,6 +26,16 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 - Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
 - Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
 
+
+
+# Support the team
+I :heart: doing research. New hardware (e.g. servos, periphery, PCBs) is very expensive. Feel free to support me and thus fasten up the research activity.
+
+Dev | captainchris |
+--- | --- |
+Buy me a coffee | <a href="https://www.buymeacoffee.com/Captainchris"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" height="20px"></a> | 
+Ko-fi | [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/captainchris88) |
+
 ## 🛠️ Bill of Materials (BOM)
 
 Core Components
