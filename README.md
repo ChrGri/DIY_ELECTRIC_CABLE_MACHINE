@@ -25,7 +25,8 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 - Fully Open-Source: All 3D models (STL/STEP) and firmware code are provided.
 - Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
 - Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
-
+- controller via web interface --> 
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/b3decf32-4f61-4d17-a9bc-2b21e9cfe277" />
 
 
 # Support the team
