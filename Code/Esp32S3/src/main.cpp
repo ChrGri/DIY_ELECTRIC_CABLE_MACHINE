@@ -13,6 +13,8 @@
  * *** MODIFIED ***
  * - Increased torque slider max to 200% (value 2000)
  * - Added Homing functionality (Button, WS command, State Machine)
+ * - Added Homing race condition fix (WAIT_FOR_RUNNING)
+ * - Added EMERGENCY STOP button
  */
 
 #include <WiFi.h>
@@ -141,17 +143,28 @@ const char index_html[] PROGMEM = R"rawliteral(
     .btn { padding: 10px 15px; font-size: 1em; cursor: pointer; border: none; border-radius: 5px; margin-right: 10px; }
     .btn-enable { background-color: #28a745; color: white; }
     .btn-disable { background-color: #dc3545; color: white; }
-    .btn-home { background-color: #007bff; color: white; } /* NEUER STYLE */
+    .btn-home { background-color: #007bff; color: white; }
     .btn-disabled { background-color: #6c757d; color: white; cursor: not-allowed;}
+    /* *** NEUER STYLE für E-Stop *** */
+    .btn-estop { 
+        background-color: #ff0000; /* Leuchtend Rot */
+        color: white; 
+        font-weight: bold; 
+        width: 100%; /* Volle Breite */
+        margin-top: 10px;
+        padding: 15px; /* Größerer Knopf */
+        font-size: 1.2em;
+        margin-right: 0;
+    }
     .status { margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px; }
     .status p { margin: 5px 0; }
     .status strong { color: #555; }
     .status-badge { padding: 3px 8px; border-radius: 4px; color: white; font-weight: bold; display: inline-block; min-width: 60px; text-align: center;}
-    .status-run { background-color: #28a745; } /* Grün für RUN */
-    .status-ready { background-color: #ffc107; color: #333;} /* Gelb für READY */
-    .status-nr { background-color: #6c757d; } /* Grau für NOT READY */
-    .status-fault { background-color: #dc3545; } /* Rot für FAULT */
-    .status-off { background-color: #6c757d; } /* Grau für DISABLED (vom ESP gesehen) */
+    .status-run { background-color: #28a745; }
+    .status-ready { background-color: #ffc107; color: #333;}
+    .status-nr { background-color: #6c757d; }
+    .status-fault { background-color: #dc3545; }
+    .status-off { background-color: #6c757d; }
     .status-modbus-ok { background-color: #17a2b8; }
     .status-modbus-fail { background-color: #ffc107; color: #333; }
     .di-indicator { display: inline-block; width: 15px; height: 15px; border-radius: 50%; margin-left: 5px; vertical-align: middle;}
@@ -172,6 +185,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       <button id="enableBtn" class="btn btn-enable">Aktivieren</button>
       <button id="disableBtn" class="btn btn-disable">Deaktivieren</button>
       <button id="homeBtn" class="btn btn-home">Homing</button>
+    </div>
+    <div class="control-group">
+        <button id="estopBtn" class="btn btn-estop">EMERGENCY STOP</button>
     </div>
     <div class="status">
       <h4>Status</h4>
@@ -213,7 +229,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     document.getElementById('torqueSlider').addEventListener('change', onSliderChange);
     document.getElementById('enableBtn').addEventListener('click', onEnableClick);
     document.getElementById('disableBtn').addEventListener('click', onDisableClick);
-    document.getElementById('homeBtn').addEventListener('click', onHomeClick); // *** NEU ***
+    document.getElementById('homeBtn').addEventListener('click', onHomeClick);
+    document.getElementById('estopBtn').addEventListener('click', onEstopClick); // *** NEU ***
     updateButtonStates(false, false); // Initial state assuming disabled and not homing
   }
 
@@ -267,14 +284,12 @@ const char index_html[] PROGMEM = R"rawliteral(
         return;
       }
       
-      // *** NEU: Handle Homing Status Messages ***
       if (data.type === 'homingStatus') {
         logToConsole('Homing Status: ' + data.message);
         // Re-enable homing button on finish/fail
         if (data.status === 'finished' || data.status === 'failed') {
             document.getElementById('homeBtn').disabled = false;
             document.getElementById('homeBtn').classList.remove('btn-disabled');
-            // We still rely on the main status update to re-enable other buttons
         }
         return;
       }
@@ -303,8 +318,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('servoStatusCode').textContent = data.servoStatus;
 
         let isActuallyEnabled = (data.servoStatus === 2);
-        let homingInProgress = data.homingInProgress || false; // *** NEU ***
-        updateButtonStates(isActuallyEnabled, homingInProgress); // *** GEÄNDERT ***
+        let homingInProgress = data.homingInProgress || false;
+        updateButtonStates(isActuallyEnabled, homingInProgress);
 
         let diVal = data.diStatus;
         document.getElementById('diValueHex').textContent = '0x' + diVal.toString(16).padStart(2, '0');
@@ -347,28 +362,44 @@ const char index_html[] PROGMEM = R"rawliteral(
     websocket.send(JSON.stringify({command: 'setTorque', value: 0}));
   }
   
-  // *** NEUE FUNKTION ***
   function onHomeClick(event) {
     logToConsole("Homing Button Clicked - Requesting Homing Start");
-    // Disable button to prevent multiple clicks
     document.getElementById('homeBtn').disabled = true;
     document.getElementById('homeBtn').classList.add('btn-disabled');
     websocket.send(JSON.stringify({command: 'startHoming'}));
+  }
+
+  // *** NEUE FUNKTION ***
+  function onEstopClick(event) {
+    logToConsole("!!! EMERGENCY STOP Clicked !!!");
+    
+    // Zustand auf Client-Seite sofort zurücksetzen
+    servoTargetState = false;
+    targetTorque = 0;
+    document.getElementById('torqueSlider').value = 0;
+    document.getElementById('torqueValue').textContent = '0.0 %';
+
+    // E-Stop-Befehl an ESP senden
+    websocket.send(JSON.stringify({command: 'eStop'}));
   }
 
   // *** GEÄNDERTE FUNKTION ***
   function updateButtonStates(isServoActuallyEnabled, homingInProgress) {
      let modbusIsOk = document.getElementById('modbusStatus').textContent === 'OK';
 
-     // Enable/Disable buttons are disabled if servo state matches, or if homing is active
+     // Enable/Disable buttons
      document.getElementById('enableBtn').disabled = isServoActuallyEnabled || homingInProgress;
      document.getElementById('enableBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || homingInProgress);
      document.getElementById('disableBtn').disabled = !isServoActuallyEnabled || homingInProgress;
      document.getElementById('disableBtn').classList.toggle('btn-disabled', !isServoActuallyEnabled || homingInProgress);
      
-     // Homing button is disabled if servo is enabled, modbus is not OK, or homing is active
+     // Homing button
      document.getElementById('homeBtn').disabled = isServoActuallyEnabled || !modbusIsOk || homingInProgress;
      document.getElementById('homeBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || !modbusIsOk || homingInProgress);
+
+     // E-Stop button (Immer aktiv, außer Modbus ist offline)
+     document.getElementById('estopBtn').disabled = !modbusIsOk;
+     document.getElementById('estopBtn').classList.toggle('btn-disabled', !modbusIsOk);
   }
 </script>
 </body>
@@ -612,6 +643,21 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                              wsJsonTx.clear(); wsJsonTx["type"] = "homingStatus"; wsJsonTx["status"] = "failed"; wsJsonTx["message"] = "Homing rejected.";
                              String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString);
                          }
+                     // *** NEUER E-Stop Befehl ***
+                     } else if (strcmp(command, "eStop") == 0) {
+                         Serial.println("WS: Received EMERGENCY STOP command!");
+                         logToBrowser("!!! EMERGENCY STOP Received !!!");
+                         
+                         // Erzwinge alle Zustände auf AUS
+                         servoIsEnabledTarget = false;
+                         currentTargetTorque = 0; 
+                         homingState = HOMING_IDLE; // Homing sofort abbrechen
+                         
+                         writeRegister(REG_CONTROL_MODE, 2); // Drehmomentmodus wiederherstellen
+                         writeRegister(REG_TARGET_SPEED, 0); // Zielgeschwindigkeit löschen
+
+                         // Sende sofort den Deaktivierungsbefehl
+                         disableServoModbus(); 
                      }
                 }
             }
@@ -831,6 +877,8 @@ void appLoop() {
             
             default:
                 homingState = HOMING_IDLE;
+                writeRegister(REG_CONTROL_MODE, 2); // Drehmomentmodus wiederherstellen
+                writeRegister(REG_TARGET_SPEED, 0); // Zielgeschwindigkeit löschen
                 break;
         }
     }
