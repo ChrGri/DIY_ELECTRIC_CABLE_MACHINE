@@ -9,6 +9,10 @@
  * Monitors correct Servo Status Register (U41.0A -> 0x410A).
  * Increased Modbus read interval and improved error handling.
  * Added detailed logging for enableCmdSent flag.
+ *
+ * *** MODIFIED ***
+ * - Increased torque slider max to 200% (value 2000)
+ * - Added Homing functionality (Button, WS command, State Machine)
  */
 
 #include <WiFi.h>
@@ -36,6 +40,7 @@ HardwareSerial ModbusSerial(2);
 
 // --- Modbus Register Adressen (Hex) ---
 #define REG_CONTROL_MODE 0x0000        // C00.00
+#define REG_TARGET_SPEED 0x0321        // C03.21 *** NEU HINZUGEFÜGT ***
 #define REG_TORQUE_REF_SRC 0x0340      // C03.40
 #define REG_TARGET_TORQUE 0x0341       // C03.41
 #define REG_MODBUS_SERVO_ON 0x0411     // Servo Enable/Disable (Write)
@@ -70,7 +75,25 @@ uint16_t actualServoStatus = 0;
 uint16_t diStatus = 0;
 int modbusConsecutiveErrors = 0; // Zähler für Modbus-Fehler
 const int MAX_MODBUS_ERRORS = 5; // Anzahl Fehler, bevor Verbindung als schlecht gilt
-bool enableCmdSent = false;      // *** MADE GLOBAL *** Track if enable command was sent
+bool enableCmdSent = false;      // Track if enable command was sent
+
+// --- Homing State (NEU) ---
+enum HomingState {
+    HOMING_IDLE,
+    HOMING_START,
+    HOMING_WAIT_FOR_RUNNING, // <-- NEUER ZUSTAND
+    HOMING_MOVING_SLOW,
+    HOMING_DONE
+};
+volatile HomingState homingState = HOMING_IDLE;
+int32_t homingPosition = 0;
+const int16_t HOMING_SPEED_RPM = 60; // Homing-Geschwindigkeit 60 U/min
+const int16_t HOMING_TORQUE_THRESHOLD = 100; // 10.0% Drehmoment (als "Strom"-Schwellenwert)
+
+// NEUE Timer-Variablen für Homing
+unsigned long homingStartTime = 0;
+const long HOMING_START_TIMEOUT = 2000; // 2 Sekunden Warten auf "Running"
+
 
 // Zeitsteuerung
 unsigned long lastModbusReadTime = 0;
@@ -101,7 +124,7 @@ void logToBrowser(const char* format, ...) {
     }
 }
 
-// --- HTML für Hauptseite (mit Log-Fenster - unverändert) ---
+// --- HTML für Hauptseite (mit Log-Fenster - *** GEÄNDERT ***) ---
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
@@ -118,6 +141,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     .btn { padding: 10px 15px; font-size: 1em; cursor: pointer; border: none; border-radius: 5px; margin-right: 10px; }
     .btn-enable { background-color: #28a745; color: white; }
     .btn-disable { background-color: #dc3545; color: white; }
+    .btn-home { background-color: #007bff; color: white; } /* NEUER STYLE */
     .btn-disabled { background-color: #6c757d; color: white; cursor: not-allowed;}
     .status { margin-top: 20px; padding: 15px; background-color: #e9ecef; border-radius: 5px; }
     .status p { margin: 5px 0; }
@@ -141,12 +165,13 @@ const char index_html[] PROGMEM = R"rawliteral(
     <h2>A6-RS Servo Steuerung</h2>
     <div class="control-group">
       <label for="torqueSlider">Zieldrehmoment (%):</label>
-      <input type="range" id="torqueSlider" min="0" max="1000" value="0" step="10">
+      <input type="range" id="torqueSlider" min="0" max="2000" value="0" step="10">
       <div id="torqueValue" class="value-display">0.0 %</div>
     </div>
     <div class="control-group">
       <button id="enableBtn" class="btn btn-enable">Aktivieren</button>
       <button id="disableBtn" class="btn btn-disable">Deaktivieren</button>
+      <button id="homeBtn" class="btn btn-home">Homing</button>
     </div>
     <div class="status">
       <h4>Status</h4>
@@ -188,7 +213,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     document.getElementById('torqueSlider').addEventListener('change', onSliderChange);
     document.getElementById('enableBtn').addEventListener('click', onEnableClick);
     document.getElementById('disableBtn').addEventListener('click', onDisableClick);
-    updateButtonStates(false); // Initial state assuming disabled
+    document.getElementById('homeBtn').addEventListener('click', onHomeClick); // *** NEU ***
+    updateButtonStates(false, false); // Initial state assuming disabled and not homing
   }
 
   function initWebSocket() {
@@ -240,6 +266,18 @@ const char index_html[] PROGMEM = R"rawliteral(
         logToConsole(data.message);
         return;
       }
+      
+      // *** NEU: Handle Homing Status Messages ***
+      if (data.type === 'homingStatus') {
+        logToConsole('Homing Status: ' + data.message);
+        // Re-enable homing button on finish/fail
+        if (data.status === 'finished' || data.status === 'failed') {
+            document.getElementById('homeBtn').disabled = false;
+            document.getElementById('homeBtn').classList.remove('btn-disabled');
+            // We still rely on the main status update to re-enable other buttons
+        }
+        return;
+      }
 
       // Handle Status Updates
       if (data.type === 'status') {
@@ -265,7 +303,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('servoStatusCode').textContent = data.servoStatus;
 
         let isActuallyEnabled = (data.servoStatus === 2);
-        updateButtonStates(isActuallyEnabled);
+        let homingInProgress = data.homingInProgress || false; // *** NEU ***
+        updateButtonStates(isActuallyEnabled, homingInProgress); // *** GEÄNDERT ***
 
         let diVal = data.diStatus;
         document.getElementById('diValueHex').textContent = '0x' + diVal.toString(16).padStart(2, '0');
@@ -307,12 +346,29 @@ const char index_html[] PROGMEM = R"rawliteral(
     document.getElementById('torqueValue').textContent = '0.0 %';
     websocket.send(JSON.stringify({command: 'setTorque', value: 0}));
   }
+  
+  // *** NEUE FUNKTION ***
+  function onHomeClick(event) {
+    logToConsole("Homing Button Clicked - Requesting Homing Start");
+    // Disable button to prevent multiple clicks
+    document.getElementById('homeBtn').disabled = true;
+    document.getElementById('homeBtn').classList.add('btn-disabled');
+    websocket.send(JSON.stringify({command: 'startHoming'}));
+  }
 
-  function updateButtonStates(isServoActuallyEnabled) {
-     document.getElementById('enableBtn').disabled = isServoActuallyEnabled;
-     document.getElementById('enableBtn').classList.toggle('btn-disabled', isServoActuallyEnabled);
-     document.getElementById('disableBtn').disabled = !isServoActuallyEnabled;
-     document.getElementById('disableBtn').classList.toggle('btn-disabled', !isServoActuallyEnabled);
+  // *** GEÄNDERTE FUNKTION ***
+  function updateButtonStates(isServoActuallyEnabled, homingInProgress) {
+     let modbusIsOk = document.getElementById('modbusStatus').textContent === 'OK';
+
+     // Enable/Disable buttons are disabled if servo state matches, or if homing is active
+     document.getElementById('enableBtn').disabled = isServoActuallyEnabled || homingInProgress;
+     document.getElementById('enableBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || homingInProgress);
+     document.getElementById('disableBtn').disabled = !isServoActuallyEnabled || homingInProgress;
+     document.getElementById('disableBtn').classList.toggle('btn-disabled', !isServoActuallyEnabled || homingInProgress);
+     
+     // Homing button is disabled if servo is enabled, modbus is not OK, or homing is active
+     document.getElementById('homeBtn').disabled = isServoActuallyEnabled || !modbusIsOk || homingInProgress;
+     document.getElementById('homeBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || !modbusIsOk || homingInProgress);
   }
 </script>
 </body>
@@ -350,12 +406,12 @@ bool enableServoModbus() {
     logToBrowser("Attempting to enable Servo via Modbus (0x0411 = 1)...");
     if (writeRegister(REG_MODBUS_SERVO_ON, 1)) {
         logToBrowser("-> Modbus enable command sent successfully.");
-        // delay(50); // Optional: Kurze Pause nach Enable
+        delay(50); // Optional: Kurze Pause nach Enable
         return true;
     } else {
         logToBrowser("-> Modbus enable command FAILED.");
         // Status wird durch readServoData aktualisiert oder writeRegister Fehlerbehandlung
-        // delay(50); // Optional: Kurze Pause nach Fehler
+        delay(50); // Optional: Kurze Pause nach Fehler
         return false;
     }
 }
@@ -487,7 +543,7 @@ bool readServoData() {
 }
 
 
-// --- WebSocket Event Handler (unverändert) ---
+// --- WebSocket Event Handler (*** GEÄNDERT ***) ---
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
     switch (type) {
         case WS_EVT_CONNECT:
@@ -498,6 +554,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             wsJsonTx.clear(); wsJsonTx["type"] = "status"; wsJsonTx["modbusOk"] = modbusOk; wsJsonTx["servoEnabled"] = servoIsEnabledActual;
             wsJsonTx["servoStatus"] = actualServoStatus; wsJsonTx["diStatus"] = diStatus; wsJsonTx["pos"] = actualPosition;
             wsJsonTx["spd"] = actualSpeed; wsJsonTx["trq"] = actualTorque; wsJsonTx["cur"] = rmsCurrent; wsJsonTx["vbus"] = busVoltage;
+            wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); // *** NEU ***
             { String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString); }
             break;
         case WS_EVT_DISCONNECT:
@@ -515,7 +572,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                 if (command) {
                     if (strcmp(command, "setTorque") == 0) {
                         if (wsJsonRx.containsKey("value")) {
-                            int16_t reqTorque = wsJsonRx["value"]; reqTorque = constrain(reqTorque, 0, 1000);
+                            // *** GEÄNDERT: constrain(..., 0, 2000) ***
+                            int16_t reqTorque = wsJsonRx["value"]; reqTorque = constrain(reqTorque, 0, 2000); 
                             if(currentTargetTorque != reqTorque) {
                                 currentTargetTorque = reqTorque;
                                 Serial.printf("WS: Received setTorque: %d (%.1f %%)\n", currentTargetTorque, currentTargetTorque/10.0);
@@ -534,12 +592,25 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                          wsJsonTx.clear(); wsJsonTx["type"] = "status"; wsJsonTx["modbusOk"] = modbusOk; wsJsonTx["servoEnabled"] = servoIsEnabledActual;
                          wsJsonTx["servoStatus"] = actualServoStatus; wsJsonTx["diStatus"] = diStatus; wsJsonTx["pos"] = actualPosition;
                          wsJsonTx["spd"] = actualSpeed; wsJsonTx["trq"] = actualTorque; wsJsonTx["cur"] = rmsCurrent; wsJsonTx["vbus"] = busVoltage;
+                         wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); // *** NEU ***
                          { String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString); }
                     } else if (strcmp(command, "setDI5Func") == 0) {
                          if (wsJsonRx.containsKey("value")) {
                             int16_t func = wsJsonRx["value"];
                             Serial.printf("WS: Received setDI5Func command: %d\n", func);
                             if (modbusOk) { writeRegister(REG_DI5_FUNCTION, func); }
+                         }
+                     // *** NEU: Homing-Befehl ***
+                     } else if (strcmp(command, "startHoming") == 0) {
+                         Serial.println("WS: Received startHoming command.");
+                         if (modbusOk && !servoIsEnabledActual && homingState == HOMING_IDLE) {
+                             homingState = HOMING_START;
+                             logToBrowser("Homing sequence initiated...");
+                         } else {
+                             logToBrowser("Cannot start homing: Servo is enabled, Modbus is offline, or homing already in progress.");
+                             // Send failure back to client to re-enable button
+                             wsJsonTx.clear(); wsJsonTx["type"] = "homingStatus"; wsJsonTx["status"] = "failed"; wsJsonTx["message"] = "Homing rejected.";
+                             String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString);
                          }
                      }
                 }
@@ -622,6 +693,7 @@ void setupApp() {
     // Initialisiere Timer und Zustände
     lastModbusReadTime = millis(); lastModbusCheckTime = millis(); lastWsSendTime = millis();
     servoIsEnabledTarget = false; servoIsEnabledActual = false; currentTargetTorque = 0; actualServoStatus = 0; modbusConsecutiveErrors = 0;
+    homingState = HOMING_IDLE; // Sicherstellen, dass Homing im IDLE-Zustand startet
 }
 
 // --- Haupt-Setup ---
@@ -648,10 +720,10 @@ void setup() {
     if (!connected) { setupAPMode(); }
 }
 
-// --- Haupt-Loop der App ---
+// --- Haupt-Loop der App (*** GEÄNDERT ***) ---
 void appLoop() {
     unsigned long currentTime = millis();
-    // static bool enableCmdSent = false; // *** MOVED TO GLOBAL *** Track if enable command was sent since last disable or status change
+    // static bool enableCmdSent = false; // (MOVED TO GLOBAL)
 
     // 1. Modbus Verbindung prüfen (wenn nicht ok und Intervall abgelaufen)
     if (!modbusOk && (currentTime - lastModbusCheckTime >= modbusCheckInterval)) {
@@ -672,62 +744,157 @@ void appLoop() {
         }
     }
 
-    // 3. Servo Enable/Disable Logik (Ziel vs. Aktuell - Send command only once per change)
-    if (modbusOk) {
-        // Condition to send ENABLE command: Target is ON, Actual is OFF
-        if (servoIsEnabledTarget && !servoIsEnabledActual) {
-            // Only send if the servo is READY (status 1) AND command hasn't been sent yet
-            if (actualServoStatus == 1 && !enableCmdSent) {
-                 // *** ADDED LOGGING HERE ***
-                 logToBrowser("Enable Condition Met: Target=ON, Actual=OFF, Status=1, CmdSent=FALSE -> Sending Enable Command...");
-                if(enableServoModbus()) { // Attempt to enable
-                   enableCmdSent = true; // Mark as sent, wait for status update via readServoData
-                }
-                // If sending fails, enableCmdSent remains false, retry next suitable cycle
-            }
-            // Add logging to understand why enable might not be called
-            // Log roughly every 2 seconds if stuck trying to enable
-            else if (!enableCmdSent && (currentTime % 2000 < modbusReadInterval) ) { // Check approx every 2 sec
-                 logToBrowser("Enable Check: Target=ON, Actual=OFF, Status=%d, CmdSent=%s -> Conditions not met.",
-                               actualServoStatus, enableCmdSent ? "true" : "false");
-            }
-
-
-        // Condition to send DISABLE command: Target is OFF, Actual is ON
-        } else if (!servoIsEnabledTarget && servoIsEnabledActual) {
-             // logToBrowser("Enable Check: Target=OFF, Actual=ON -> Disabling..."); // Log disable condition - Can be noisy
-            if (disableServoModbus()) { // Attempt to disable
-                enableCmdSent = false; // Reset sent flag after successful disable
-            }
-
-        // Condition where target and actual match (Reset/Set flags if needed)
-        } else {
-             // If target is OFF and actual is OFF, ensure sent flag is reset
-             if (!servoIsEnabledTarget && !servoIsEnabledActual) {
-                  if (enableCmdSent) { // Log only when resetting
-                      // logToBrowser("State Match: Target=OFF, Actual=OFF -> Resetting enableCmdSent flag.");
-                      enableCmdSent = false;
-                  }
-             }
-             // If target is ON and actual is ON, ensure sent flag is set (correct state reached)
-             else if (servoIsEnabledTarget && servoIsEnabledActual) {
-                 if (!enableCmdSent) { // Log only when setting
-                      // logToBrowser("State Match: Target=ON, Actual=ON -> Setting enableCmdSent flag.");
-                      enableCmdSent = true;
-                 }
-             }
+    // *** NEU: Homing State Machine (hat Vorrang) ***
+    if (homingState != HOMING_IDLE) {
+        if (!modbusOk) {
+            logToBrowser("Homing FAILED: Modbus connection lost.");
+            homingState = HOMING_IDLE;
+            // Benachrichtige UI
+            wsJsonTx.clear(); wsJsonTx["type"] = "homingStatus"; wsJsonTx["status"] = "failed"; wsJsonTx["message"] = "Homing FAILED: Modbus lost.";
+            { String jsonString; serializeJson(wsJsonTx, jsonString); ws.textAll(jsonString); }
         }
-    } // end if(modbusOk)
-     else {
-        // Modbus not OK -> Ensure internal state reflects disabled
-        if (servoIsEnabledActual || servoIsEnabledTarget || enableCmdSent) { // Reset if any state indicates "ON" attempt
-             servoIsEnabledActual = false;
-             servoIsEnabledTarget = false;
-             actualServoStatus = 0; // Force status to Not Ready visually if comms lost
-             enableCmdSent = false; // Reset command sent flag if connection lost
-             // logToBrowser("Modbus Lost: Forcing internal state OFF and resetting enableCmdSent."); // Can be noisy
+
+        switch (homingState) {
+            case HOMING_START:
+                logToBrowser("Homing: Setting Speed Mode (1) and Target Speed (%d rpm)...", HOMING_SPEED_RPM);
+                if (writeRegister(REG_CONTROL_MODE, 1) &&         // Set Speed Mode
+                    writeRegister(REG_TARGET_SPEED, HOMING_SPEED_RPM)) {
+                    
+                    logToBrowser("Homing: Enabling servo...");
+                    if (enableServoModbus()) {
+                        logToBrowser("Homing: Servo enable command sent. Waiting for 'Running' status...");
+                        homingStartTime = millis(); // Timeout-Timer starten
+                        homingState = HOMING_WAIT_FOR_RUNNING; // <-- Zum Wartezustand wechseln
+                    } else {
+                        logToBrowser("Homing FAILED: Could not enable servo.");
+                        writeRegister(REG_CONTROL_MODE, 2); // Torque-Modus wiederherstellen
+                        homingState = HOMING_IDLE; // Abort
+                    }
+                } else {
+                    logToBrowser("Homing FAILED: Could not set speed mode/target.");
+                    homingState = HOMING_IDLE; // Abort
+                }
+                break;
+
+            // *** NEUER ZUSTAND ***
+            case HOMING_WAIT_FOR_RUNNING:
+                if (servoIsEnabledActual) { // Servo meldet Status 2 ("Running")
+                    logToBrowser("Homing: Servo is 'Running'. Now monitoring for stall.");
+                    homingState = HOMING_MOVING_SLOW; // Jetzt mit der Überwachung beginnen
+                } else if (actualServoStatus == 3) { // Servo meldet Fehler
+                    logToBrowser("Homing FAILED: Servo faulted while trying to start.");
+                    homingState = HOMING_IDLE;
+                } else if (millis() - homingStartTime > HOMING_START_TIMEOUT) { // Zeit abgelaufen
+                    logToBrowser("Homing FAILED: Servo did not enter 'Running' state (Timeout).");
+                    disableServoModbus(); // Versuchen, wieder zu deaktivieren
+                    writeRegister(REG_CONTROL_MODE, 2); // Torque-Modus wiederherstellen
+                    homingState = HOMING_IDLE;
+                }
+                // Sonst: Warten, bis eine der obigen Bedingungen eintritt
+                break;
+
+            case HOMING_MOVING_SLOW:
+                // Dieser Block wird jetzt nur erreicht, wenn der Servo bestätigt hat, dass er läuft
+                if (servoIsEnabledActual) { // Prüfen, ob der Servo noch läuft
+                    if (abs(actualTorque) > HOMING_TORQUE_THRESHOLD) { 
+                        logToBrowser("Homing: Stall detected (Torque > 10.0%%) at position %d. Stopping.", actualPosition);
+                        homingPosition = actualPosition; // Position speichern
+                        homingState = HOMING_DONE;
+                    }
+                } else {
+                    // Servo hat unerwartet gestoppt (NACHDEM er lief)
+                    if (actualServoStatus != 3) { // Wenn es kein Fehler war
+                        logToBrowser("Homing FAILED: Servo stopped unexpectedly before stall.");
+                    } else {
+                        logToBrowser("Homing FAILED: Servo faulted during homing.");
+                    }
+                    homingState = HOMING_IDLE; // Abort
+                }
+                break;
+
+            case HOMING_DONE:
+                logToBrowser("Homing: Disabling servo and restoring Torque Mode (2)...");
+                disableServoModbus(); // Motor stoppen
+                writeRegister(REG_CONTROL_MODE, 2); // Drehmomentmodus wiederherstellen
+                writeRegister(REG_TARGET_SPEED, 0); // Zielgeschwindigkeit löschen
+                
+                logToBrowser("Homing Finished. Position set to %d.", homingPosition);
+                // HIER KÖNNTE man die Position als Nullpunkt setzen, falls gewünscht
+                
+                // Sende Abschlussnachricht an die Web-UI
+                wsJsonTx.clear(); wsJsonTx["type"] = "homingStatus"; wsJsonTx["status"] = "finished";
+                wsJsonTx["message"] = "Homing complete. Position: " + String(homingPosition);
+                { String jsonString; serializeJson(wsJsonTx, jsonString); ws.textAll(jsonString); }
+
+                homingState = HOMING_IDLE; // Zurück zum Leerlauf
+                break;
+            
+            default:
+                homingState = HOMING_IDLE;
+                break;
         }
     }
+
+
+    // 3. Servo Enable/Disable Logik (Ziel vs. Aktuell - Send command only once per change)
+    // *** Diese Logik nur ausführen, wenn KEIN Homing aktiv ist ***
+    if (homingState == HOMING_IDLE) {
+        if (modbusOk) {
+            // Condition to send ENABLE command: Target is ON, Actual is OFF
+            if (servoIsEnabledTarget && !servoIsEnabledActual) {
+                // Only send if the servo is READY (status 1) AND command hasn't been sent yet
+                if (actualServoStatus == 1 && !enableCmdSent) {
+                     // *** ADDED LOGGING HERE ***
+                     logToBrowser("Enable Condition Met: Target=ON, Actual=OFF, Status=1, CmdSent=FALSE -> Sending Enable Command...");
+                    if(enableServoModbus()) { // Attempt to enable
+                       enableCmdSent = true; // Mark as sent, wait for status update via readServoData
+                    }
+                    // If sending fails, enableCmdSent remains false, retry next suitable cycle
+                }
+                // Add logging to understand why enable might not be called
+                // Log roughly every 2 seconds if stuck trying to enable
+                else if (!enableCmdSent && (currentTime % 2000 < modbusReadInterval) ) { // Check approx every 2 sec
+                     logToBrowser("Enable Check: Target=ON, Actual=OFF, Status=%d, CmdSent=%s -> Conditions not met.",
+                                   actualServoStatus, enableCmdSent ? "true" : "false");
+                }
+
+
+            // Condition to send DISABLE command: Target is OFF, Actual is ON
+            } else if (!servoIsEnabledTarget && servoIsEnabledActual) {
+                 // logToBrowser("Enable Check: Target=OFF, Actual=ON -> Disabling..."); // Log disable condition - Can be noisy
+                if (disableServoModbus()) { // Attempt to disable
+                    enableCmdSent = false; // Reset sent flag after successful disable
+                }
+
+            // Condition where target and actual match (Reset/Set flags if needed)
+            } else {
+                 // If target is OFF and actual is OFF, ensure sent flag is reset
+                 if (!servoIsEnabledTarget && !servoIsEnabledActual) {
+                      if (enableCmdSent) { // Log only when resetting
+                          // logToBrowser("State Match: Target=OFF, Actual=OFF -> Resetting enableCmdSent flag.");
+                          enableCmdSent = false;
+                      }
+                 }
+                 // If target is ON and actual is ON, ensure sent flag is set (correct state reached)
+                 else if (servoIsEnabledTarget && servoIsEnabledActual) {
+                     if (!enableCmdSent) { // Log only when setting
+                          // logToBrowser("State Match: Target=ON, Actual=ON -> Setting enableCmdSent flag.");
+                          enableCmdSent = true;
+                     }
+                 }
+            }
+        } // end if(modbusOk)
+         else {
+            // Modbus not OK -> Ensure internal state reflects disabled
+            if (servoIsEnabledActual || servoIsEnabledTarget || enableCmdSent) { // Reset if any state indicates "ON" attempt
+                 servoIsEnabledActual = false;
+                 servoIsEnabledTarget = false;
+                 actualServoStatus = 0; // Force status to Not Ready visually if comms lost
+                 enableCmdSent = false; // Reset command sent flag if connection lost
+                 // logToBrowser("Modbus Lost: Forcing internal state OFF and resetting enableCmdSent."); // Can be noisy
+            }
+        }
+    } // end if(homingState == HOMING_IDLE)
 
 
     // 4. Daten an WebSocket Clients senden
@@ -745,6 +912,7 @@ void appLoop() {
             wsJsonTx["trq"] = actualTorque;
             wsJsonTx["cur"] = rmsCurrent;
             wsJsonTx["vbus"] = busVoltage;
+            wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); // *** NEU ***
             { String jsonString; serializeJson(wsJsonTx, jsonString); ws.textAll(jsonString); }
         }
     }
@@ -780,9 +948,9 @@ void loop() {
             servoIsEnabledActual = false;
             servoIsEnabledTarget = false;
             enableCmdSent = false; // Reset flag on disconnect
+            homingState = HOMING_IDLE; // Homing bei WLAN-Verlust abbrechen
             logToBrowser("WiFi lost, Modbus communication stopped.");
         }
         delay(500); // Wait between checks
     }
 }
-
