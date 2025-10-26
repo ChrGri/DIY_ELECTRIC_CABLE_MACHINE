@@ -29,8 +29,8 @@
 #include <Preferences.h>
 
 // --- Pin-Definitionen (ESP32-S3) ---
-#define RXD2_PIN 18 // Modbus Serial2 RX
-#define TXD2_PIN 21 // Modbus Serial2 TX
+#define RXD2_PIN 6 // Modbus Serial2 RX
+#define TXD2_PIN 4 // Modbus Serial2 TX
 
 // --- WiFi Configuration ---
 Preferences preferences;
