@@ -42,10 +42,10 @@ Ko-fi | [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/
 Core Components
 | Component | Model / Spec | Notes | (affiliate) link|
 |--|--|--|--|
-| Microcontroller | ESP32 Dev Board | Any ESP32-WROOM-32 board will work. | |
+| Microcontroller | ESP32 S3 dev board |  | [Amazon](https://amzn.to/48NTnuW) |
+| RJ45  cable |  | | [Amazon](https://amzn.to/47rE3Si) |
+| TTL to Modbus converter |  |  | [Amazon](https://amzn.to/4nr72vo) |
 | Servo Motor | StepperOnline A6 Servo | e.g., A6-750W or similar. Choose based on desired power. | [A6 1,27Nm](https://www.omc-stepperonline.com/de/a6-serie-400w-rs485-ac-servomotor-kit-3000rpm-1-27nm-17-bit-absolutwertgeber-ip67-a6-rs400h2a1-m17?tracking=6721c5865911c)
-| Potentiometer | 3 leg resistor | To control the resistance | |
-| Power Supply | Integrated 230V AC | | |
 | Gym Cable | 3mm Polyster cord x 30m | Polyster cord is strong. | [Polyster cord](https://amzn.to/49fXEY2) |
 | Handle | Standard D-Handle | Any cable machine attachment works. |  |
 
@@ -66,18 +66,13 @@ Here is the basic wiring schematic for connecting the ESP32 to the servo driver.
 
 Warning: You are working with high-voltage AC (for the PSU) and high-current DC (for the servo). Always double-check your connections and ensure everything is unplugged when wiring.
 
-(A simplified diagram. The A6 driver manual will have detailed pinouts for alarm, enable, and pulse/dir signals.)
-
-| from ESP32 | to A6 servo |
+| from ESP32 | to A6 servo RJ45 |
 |--|--|
-| GPIO 34 (Potentiometer in)  | None | 
-| GPIO 25 (DAC out) | Pin 20 |
-| GPIO 4 (Servo ON signal) | Pin 33 |
-| Gnd | Pin 19 & Pin 29 |
+| GPIO 18 (RX)  | Pin 4 | 
+| GPIO 21 (TX) | Pin 5 |
+| GND | Pin 8 |
 
-<img width="200" alt="image" src="https://github.com/user-attachments/assets/7df0e231-b9e5-4612-b3d2-d33201c116be" />
-<img width="200" alt="image" src="https://github.com/user-attachments/assets/1ee3dc36-98e3-43b8-a27f-07aad9a8bf64" />
-
+For Modbus communication and wiring please refer to this https://help.stepperonline.com/en/article/a6-servo-motor-rs485-operation-instruction-1u47bbl/
 
 
 ## 💾 Firmware Setup
