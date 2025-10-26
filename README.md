@@ -68,29 +68,29 @@ Warning: You are working with high-voltage AC (for the PSU) and high-current DC 
 
 ### Connect the ESP32 to the TTL-to-Modbus board
    
-| from ESP32 | TTL-to-Modbus Adapter |
+| from ESP32 <br> <img width="300" alt="image" src="https://github.com/user-attachments/assets/565de791-3d64-4211-a45e-7528fca7ca63" /> | TTL-to-Modbus Adapter <br> <img width="300" alt="image" src="https://github.com/user-attachments/assets/a77039a2-16b3-4150-8030-5f5a5e6e795c" /> |
 |--|--|
 | 3V3 | VCC |
-| GPIO 21 (TX) | TXD |
-| GPIO 18 (RX)  | RXD | 
+| GPIO 4 (TX) | TXD |
+| GPIO 5 (RX)  | RXD | 
 | GND | GND |
 
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/a77039a2-16b3-4150-8030-5f5a5e6e795c" />
-
 ### Connect the TTL-to-Modbus board to the RJ45 plug
-| TTL-RJ45 Adapter | RJ45 |
+| TTL-RJ45 Adapter <br> <img width="300" alt="image" src="https://github.com/user-attachments/assets/a77039a2-16b3-4150-8030-5f5a5e6e795c" /> | RJ45 <br> <img width="300" alt="image" src="https://github.com/user-attachments/assets/48953fcf-1dca-4519-84ba-6b3fe31a07a5" /> |
 |--|--|
 | A+  | Pin 4 | 
 | B- | Pin 5 |
 | GND | Pin 8 |
 
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/7676d3fb-c37f-4bac-9296-f0dc9edf521c" />
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/7676d3fb-c37f-4bac-9296-f0dc9edf521c" /> <br>
 For Modbus communication and wiring please refer to this https://help.stepperonline.com/en/article/a6-servo-motor-rs485-operation-instruction-1u47bbl/
+
+In the end, the wiring should look like this <br>
+<img width="1920" alt="image" src="https://github.com/user-attachments/assets/7debd940-cc97-4287-b648-e6949aee0342" />.
 
 ### Connect the RJ45 plug into the A6 servos CN3 port. 
 Connect the RJ45 plug to CN3 port of the servo, port (5) in the image below:<br> 
 <img width="300" alt="image" src="https://github.com/user-attachments/assets/6a706332-f489-4afa-a6c6-19f2577885f1" />
-
 
 
 
