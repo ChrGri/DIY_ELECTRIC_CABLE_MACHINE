@@ -97,10 +97,19 @@ Connect the RJ45 plug to CN3 port of the servo, port (5) in the image below:<br>
 ## 💾 Firmware Setup
 
 The firmware is written using the Arduino framework for the ESP32.
+### VSCode
+Install [VSCode](https://code.visualstudio.com/)
 
-1. IDE: Open this project in PlatformIO (recommended) or the Arduino IDE.
-2. Libraries: Install the required libraries (e.g., ESPAsyncWebServer, AccelStepper).
-3. Flash: Build and upload the firmware to your ESP32.
+### PlatformIO
+Install [PlatformIO](https://platformio.org/install/ide?install=vscode) in Visual Studio Code
+
+> ![Note]
+> When you restart VS Code for the first time after the PlatformIO extension is installed, it will install and build the development environment which will take a moment. Wait until it is complete before attempting to open the project.
+
+### Flashing the firmware
+
+1. IDE: Open [Code/Esp32S3](https://github.com/ChrGri/DIY_ELECTRIC_CABLE_MACHINE/tree/main/Code/Esp32S3) folder in VSCode
+2. Flash: Build and upload the firmware to your ESP32.
 
 ## 🚀 How to Use
 
