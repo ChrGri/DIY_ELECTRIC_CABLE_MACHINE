@@ -72,7 +72,7 @@ Warning: You are working with high-voltage AC (for the PSU) and high-current DC 
 |--|--|
 | 3V3 | VCC |
 | GPIO 4 (TX) | TXD |
-| GPIO 5 (RX)  | RXD | 
+| GPIO 6 (RX)  | RXD | 
 | GND | GND |
 
 ### Connect the TTL-to-Modbus board to the RJ45 plug
