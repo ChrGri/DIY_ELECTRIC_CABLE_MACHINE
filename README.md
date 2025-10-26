@@ -15,7 +15,7 @@ Action video, see [here](Doc/Videos/ActionVideo_1.mp4).
 
 This project is a Do-It-Yourself (DIY) approach to modern smart gyms. Instead of using a traditional weight stack, this machine uses a powerful closed-loop servo motor (StepperOnline A6) controlled by an ESP32 to provide resistance. This allows for digitally adjustable weight, smooth operation, and the potential for advanced features like eccentric-only training, custom resistance curves, and workout tracking.
 
-The core of the build relies on accessible components: the powerful ESP32, a reliable industrial servo, a standard gym cable/handle, and custom 3D-printed parts for the spool and mounting.
+The core of the build relies on accessible components: the powerful ESP32, a reliable industrial servo, a standard gym cable/handle, and custom 3D-printed parts for the spool and mounting. The ESP32 S3 was selected, since it has onboard WiFi and Bluetooth functionality and sufficient compute to allow web based control.  
 
 ## ✨ Key Features
 
