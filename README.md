@@ -92,6 +92,10 @@ In the end, the wiring should look like this <br>
 Connect the RJ45 plug to CN3 port of the servo, port (5) in the image below:<br> 
 <img width="300" alt="image" src="https://github.com/user-attachments/assets/6a706332-f489-4afa-a6c6-19f2577885f1" />
 
+### AC and Servo wiring
+Please refer to the A6 manual for wiring of the A6 servo. As an example, here is how mine is wired up: <br>
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/1e850616-a45b-45bc-85a9-74cca3e09376" />
+
 
 
 ## 💾 Firmware Setup
