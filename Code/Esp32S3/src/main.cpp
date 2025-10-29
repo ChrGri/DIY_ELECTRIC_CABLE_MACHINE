@@ -6,9 +6,8 @@
  * Includes two live charts (Position/Time, Voltage/Time) using Chart.js.
  *
  * *** MODIFIED ***
- * - Split the single chart into two separate charts: Position vs Time and Voltage vs Time.
- * - Implemented a rolling 20-second time window for both charts.
- * - Translated all comments and UI text to English.
+ * - Changed slider to represent and control Target Weight (kg) instead of Max Torque (%).
+ * - Calculated conversion factor based on provided servo specs.
  */
 
 #include <WiFi.h>
@@ -48,7 +47,7 @@ HardwareSerial ModbusSerial(2);
 #define REG_OUT_OF_CONTROL_PROT 0x0620 // C06.20 (Out of Control Protection Mode)
 #define REG_SPEED_FEEDBACK 0x4001      // U40.01
 #define REG_TORQUE_FEEDBACK 0x4003     // U40.03
-#define REG_DI_STATUS 0x4004           // U40.04
+#define REG_DI_STATUS 0x0404           // C04.04 according to doc, but seems U40.04 in practice? Using 0x4004 for now.
 #define REG_BUS_VOLTAGE 0x4006         // U40.06
 #define REG_RMS_CURRENT 0x400C         // U40.0C
 #define REG_POSITION_FEEDBACK_L 0x4016 // U40.16 (Low)
@@ -68,7 +67,7 @@ StaticJsonDocument<128> wsJsonRx;
 bool servoIsEnabledTarget = false;
 bool servoIsEnabledActual = false;
 bool modbusOk = false;
-int16_t currentTargetTorque = 0; // Represents the MAX torque from slider (0-2000)
+int16_t currentTargetTorque = 0; // Represents the MAX torque (0-2000) sent to servo
 int16_t actualSpeed = 0;
 int16_t actualTorque = 0;
 uint16_t busVoltage = 0;
@@ -128,7 +127,7 @@ void logToBrowser(const char* format, ...) {
     }
 }
 
-// --- HTML for main page (with log window - *** UPDATED: Two Charts, English Text ***) ---
+// --- HTML for main page (*** UPDATED: Slider controls weight (kg) ***) ---
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
@@ -141,7 +140,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <style>
     body { font-family: Arial, sans-serif; padding: 15px; background-color: #f4f4f4; }
     h2 { color: #333; text-align: center; }
-    .container { max-width: 700px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); } /* Width adjusted */
+    .container { max-width: 700px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
     .control-group { margin-bottom: 20px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type=range] { width: 100%; }
@@ -170,16 +169,17 @@ const char index_html[] PROGMEM = R"rawliteral(
     .di-on { background-color: limegreen; }
     .di-off { background-color: lightgrey; }
     #logOutput { width: 98%; height: 150px; background-color: #333; color: #fff; font-family: monospace; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; margin-top: 15px; overflow-y: scroll; padding: 5px; }
-    .chart-container { margin-top: 30px; height: 250px; /* Set height for charts */ } 
+    .chart-container { margin-top: 30px; height: 250px; } 
   </style>
 </head>
 <body>
   <div class="container">
     <h2>A6-RS Servo Control</h2>
     <div class="control-group">
-      <label for="torqueSlider">Maximum Torque (%):</label> <!-- Label changed -->
-      <input type="range" id="torqueSlider" min="0" max="2000" value="0" step="10">
-      <div id="torqueValue" class="value-display">0.0 %</div>
+      <!-- *** LABEL, RANGE, STEP, VALUE changed *** -->
+      <label for="weightSlider">Target Weight (kg):</label> 
+      <input type="range" id="weightSlider" min="0" max="120" value="0" step="1"> <!-- 0 to 12.0 kg -->
+      <div id="weightValue" class="value-display">0.0 kg</div>
     </div>
     <div class="control-group">
       <button id="enableBtn" class="btn btn-enable">Enable</button>
@@ -209,7 +209,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       </p>
     </div>
 
-     <!-- *** Two Chart Canvases *** -->
+     <!-- Two Chart Canvases -->
      <div class="chart-container">
         <h4>Position</h4>
         <canvas id="posChart"></canvas>
@@ -224,36 +224,21 @@ const char index_html[] PROGMEM = R"rawliteral(
 <script>
   var gateway = `ws://${window.location.hostname}/ws`;
   var websocket;
-  var targetTorque = 0;
+  // var targetTorque = 0; // No longer directly used by slider
   var servoTargetState = false; 
   var logTextArea = null;
   const MAX_LOG_LINES = 100;
 
-  // *** Separate Chart Variables ***
+  // Chart Variables (unchanged)
   var posChart = null;
   var voltChart = null;
-  var commonLabels = []; // Common timestamp axis
-  var posChartData = {
-    labels: commonLabels,
-    datasets: [{
-            label: 'Position (Steps)',
-            data: [],
-            borderColor: 'rgb(75, 192, 192)',
-            backgroundColor: 'rgba(75, 192, 192, 0.5)',
-            tension: 0.1,
-        }]
-  };
-   var voltChartData = {
-    labels: commonLabels,
-    datasets: [{
-            label: 'Bus Voltage (V)',
-            data: [],
-            borderColor: 'rgb(255, 99, 132)',
-            backgroundColor: 'rgba(255, 99, 132, 0.5)',
-            tension: 0.1,
-        }]
-  };
+  var commonLabels = []; 
+  var posChartData = { labels: commonLabels, datasets: [{ label: 'Position (Steps)', data: [], borderColor: 'rgb(75, 192, 192)', backgroundColor: 'rgba(75, 192, 192, 0.5)', tension: 0.1 }] };
+  var voltChartData = { labels: commonLabels, datasets: [{ label: 'Bus Voltage (V)', data: [], borderColor: 'rgb(255, 99, 132)', backgroundColor: 'rgba(255, 99, 132, 0.5)', tension: 0.1 }] };
   const TIME_WINDOW_MS = 20000; // 20 seconds
+
+  // *** NEW: Conversion factor ***
+  const KG_TO_MODBUS_FACTOR = 169.8; // Approx (9.81 * 0.022 / 1.27) * 100 * 10
 
   window.addEventListener('load', onLoad);
 
@@ -261,12 +246,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     logTextArea = document.getElementById('logOutput');
     initWebSocket();
     initUI();
-    initCharts(); // Initialize charts
+    initCharts(); 
   }
 
   function initUI() {
-    document.getElementById('torqueSlider').addEventListener('input', onSliderInput);
-    document.getElementById('torqueSlider').addEventListener('change', onSliderChange);
+    document.getElementById('weightSlider').addEventListener('input', onSliderInput); // Changed ID
+    document.getElementById('weightSlider').addEventListener('change', onSliderChange); // Changed ID
     document.getElementById('enableBtn').addEventListener('click', onEnableClick);
     document.getElementById('disableBtn').addEventListener('click', onDisableClick);
     document.getElementById('homeBtn').addEventListener('click', onHomeClick);
@@ -274,59 +259,32 @@ const char index_html[] PROGMEM = R"rawliteral(
     updateButtonStates(false, false); 
   }
 
-  // *** Initializes BOTH Charts ***
+  // Initializes BOTH Charts (unchanged)
   function initCharts() {
     const posCtx = document.getElementById('posChart').getContext('2d');
     posChart = new Chart(posCtx, {
-        type: 'line',
-        data: posChartData,
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false, 
-            scales: {
-                x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } },
-                y: { title: { display: true, text: 'Position (Steps)' } }
-            },
-            plugins: { legend: { display: false }, title: { display: false } }
-        }
+        type: 'line', data: posChartData, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } }, y: { title: { display: true, text: 'Position (Steps)' } } }, plugins: { legend: { display: false }, title: { display: false } } }
     });
-
     const voltCtx = document.getElementById('voltChart').getContext('2d');
     voltChart = new Chart(voltCtx, {
-        type: 'line',
-        data: voltChartData,
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false, 
-            scales: {
-                x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } },
-                y: { title: { display: true, text: 'Bus Voltage (V)' }, suggestedMin: 0, suggestedMax: 400 } // Y-axis for voltage
-            },
-            plugins: { legend: { display: false }, title: { display: false } }
-        }
+        type: 'line', data: voltChartData, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } }, y: { title: { display: true, text: 'Bus Voltage (V)' }, suggestedMin: 0, suggestedMax: 400 } }, plugins: { legend: { display: false }, title: { display: false } } }
     });
   }
 
-  // *** Adds data to BOTH charts and enforces time window ***
+  // Adds data to BOTH charts and enforces time window (unchanged)
   function addDataToCharts(timestamp, position, voltage) {
     if (!posChart || !voltChart) return;
-
     commonLabels.push(timestamp);
     posChartData.datasets[0].data.push(position); 
     voltChartData.datasets[0].data.push(voltage);
-
-    // Enforce time window (remove oldest data if > 20 seconds)
     const now = Date.now();
     while (commonLabels.length > 0 && (now - commonLabels[0] > TIME_WINDOW_MS)) {
         commonLabels.shift(); 
         posChartData.datasets[0].data.shift(); 
         voltChartData.datasets[0].data.shift(); 
     }
-
-    posChart.update('none'); // Update without animation
-    voltChart.update('none'); // Update without animation
+    posChart.update('none'); 
+    voltChart.update('none'); 
   }
 
   function initWebSocket() {
@@ -421,7 +379,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             indicator.className = ((diVal >> (i - 1)) & 1) ? 'di-indicator di-on' : 'di-indicator di-off';
         }
 
-        // *** Update charts with new data ***
+        // Update charts with new data
         addDataToCharts(Date.now(), data.pos, data.vbus / 10.0);
 
       }
@@ -431,16 +389,25 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
   }
 
-    function onSliderInput(event) {
-    targetTorque = parseInt(event.target.value);
-    document.getElementById('torqueValue').textContent = (targetTorque / 10.0).toFixed(1) + ' %';
+  // *** UPDATED: Slider controls weight ***
+  function onSliderInput(event) {
+    let sliderValue = parseInt(event.target.value); // 0-120
+    let targetWeightKg = sliderValue / 10.0; // 0.0 - 12.0 kg
+    document.getElementById('weightValue').textContent = targetWeightKg.toFixed(1) + ' kg';
   }
 
+ // *** UPDATED: Slider sends calculated torque ***
  function onSliderChange(event) {
-    targetTorque = parseInt(event.target.value);
-    document.getElementById('torqueValue').textContent = (targetTorque / 10.0).toFixed(1) + ' %';
-    logToConsole("Slider Change - Setting MAX Torque: " + (targetTorque / 10.0).toFixed(1) + " %"); 
-    websocket.send(JSON.stringify({command: 'setTorque', value: targetTorque}));
+    let sliderValue = parseInt(event.target.value); // 0-120
+    let targetWeightKg = sliderValue / 10.0; // 0.0 - 12.0 kg
+    document.getElementById('weightValue').textContent = targetWeightKg.toFixed(1) + ' kg';
+
+    // Convert kg back to Modbus torque value (0-2000)
+    let modbusTorqueValue = Math.round(targetWeightKg * KG_TO_MODBUS_FACTOR);
+    modbusTorqueValue = Math.max(0, Math.min(2000, modbusTorqueValue)); // Constrain to 0-2000
+
+    logToConsole("Slider Change - Target Weight: " + targetWeightKg.toFixed(1) + " kg -> Sending Modbus Torque: " + modbusTorqueValue); 
+    websocket.send(JSON.stringify({command: 'setTorque', value: modbusTorqueValue}));
  }
 
   function onEnableClick(event) {
@@ -453,9 +420,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     logToConsole("Disable Button Clicked - Requesting Servo Disable");
     servoTargetState = false;
     websocket.send(JSON.stringify({command: 'disableServo'}));
-    targetTorque = 0;
-    document.getElementById('torqueSlider').value = 0;
-    document.getElementById('torqueValue').textContent = '0.0 %';
+    // Reset slider and send 0 torque (which corresponds to 0 kg)
+    document.getElementById('weightSlider').value = 0;
+    document.getElementById('weightValue').textContent = '0.0 kg';
     websocket.send(JSON.stringify({command: 'setTorque', value: 0}));
   }
   
@@ -469,10 +436,10 @@ const char index_html[] PROGMEM = R"rawliteral(
   function onEstopClick(event) {
     logToConsole("!!! EMERGENCY STOP Clicked !!!");
     servoTargetState = false;
-    targetTorque = 0;
-    document.getElementById('torqueSlider').value = 0;
-    document.getElementById('torqueValue').textContent = '0.0 %';
-    websocket.send(JSON.stringify({command: 'eStop'}));
+    // Reset slider and send 0 torque
+    document.getElementById('weightSlider').value = 0;
+    document.getElementById('weightValue').textContent = '0.0 kg';
+    websocket.send(JSON.stringify({command: 'eStop'})); // eStop command handles sending 0 torque
   }
 
   function updateButtonStates(isServoActuallyEnabled, homingInProgress) {
@@ -495,7 +462,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-// --- HTML for AP mode configuration page (*** UPDATED: English Text ***) ---
+// --- HTML for AP mode configuration page (unchanged) ---
 const char ap_mode_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html><head><title>Servo WiFi Setup</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial,sans-serif;padding:15px;background-color:#f4f4f4;text-align:center;}h2{color:#333;}.container{max-width:400px;margin:30px auto;background:#fff;padding:20px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.1);}.form-group{margin-bottom:15px;text-align:left;}label{display:block;margin-bottom:5px;font-weight:bold;}input[type=text],input[type=password]{width:95%;padding:10px;border:1px solid #ccc;border-radius:4px;}.btn{padding:10px 20px;font-size:1em;cursor:pointer;border:none;border-radius:5px;background-color:#007bff;color:white;}.msg{margin-top:15px;color:green;font-weight:bold;}</style></head><body><div class="container"><h2>Servo WiFi Configuration</h2><p>Please enter your WiFi credentials.</p><form action="/save" method="POST"><div class="form-group"><label for="ssid">WiFi Name (SSID):</label><input type="text" id="ssid" name="ssid" required></div><div class="form-group"><label for="pass">WiFi Password:</label><input type="password" id="pass" name="pass" required></div><button type="submit" class="btn">Save & Restart</button></form><div id="message" class="msg"></div></div></body></html>
 )rawliteral";
@@ -522,12 +489,6 @@ bool writeRegister(uint16_t reg, int16_t value) {
 
 /**
  * @brief Writes a 32-bit value (int32_t) into two consecutive 16-bit Modbus registers.
- * @param reg The starting register address (e.g., 0x0608).
- * @param value The 32-bit value to write.
- * @return true on success, false on failure.
- * @note According to A6 servo documentation: "high 16 bits are stored in high address, low 16 bits are stored in low address."
- * Register (n)   = Low Word
- * Register (n+1) = High Word
  */
 bool writeRegister32bit(uint16_t reg, int32_t value) {
     if (!modbusOk && millis() > 5000) { return false; }
@@ -575,12 +536,18 @@ bool disableServoModbus() {
     if (!success && modbusOk) { logToBrowser("-> Modbus disable command FAILED."); }
     else if (success) { logToBrowser("-> Modbus disable command sent successfully."); }
 
-    if(currentTargetTorque != 0) {
-        // Try to set torque to 0, ignore errors here since we are disabling anyway
-        writeRegister(REG_TARGET_TORQUE, 0); 
-        currentTargetTorque = 0; // Reset internal value regardless
-        logToBrowser("-> Set MAX torque to 0 after disable.");
+    // Always set target torque to 0 on disable, regardless of slider position
+    if(writeRegister(REG_TARGET_TORQUE, 0)) { 
+        currentTargetTorque = 0; // Reset internal value
+        logToBrowser("-> Set target torque to 0 after disable.");
+    } else if (modbusOk) { 
+        logToBrowser("MB: Failed to explicitly set torque to 0 after disable."); 
+        // Even if write fails, internal target is 0, preventing accidental torque on re-enable
+        currentTargetTorque = 0;
+    } else {
+        currentTargetTorque = 0; // Ensure internal target is 0 if Modbus fails
     }
+
 
     if (!success || !modbusOk) {
         actualServoStatus = (actualServoStatus == 3) ? 3 : 0; // Fault or Not Ready
@@ -739,13 +706,15 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                 const char* command = wsJsonRx["command"];
                 if (command) {
                     if (strcmp(command, "setTorque") == 0) {
+                        // This command now receives the calculated Modbus Torque value (0-2000) from JS
                         if (wsJsonRx.containsKey("value")) {
-                            int16_t reqTorque = wsJsonRx["value"]; 
-                            reqTorque = constrain(reqTorque, 0, 2000); 
+                            int16_t reqModbusTorque = wsJsonRx["value"]; 
+                            reqModbusTorque = constrain(reqModbusTorque, 0, 2000); 
                             
-                            if(currentTargetTorque != reqTorque) {
-                                currentTargetTorque = reqTorque;
-                                logToBrowser("WS: Set MAX Torque: %d (%.1f %%)\n", currentTargetTorque, currentTargetTorque/10.0);
+                            if(currentTargetTorque != reqModbusTorque) {
+                                currentTargetTorque = reqModbusTorque; // Store the target Modbus torque value
+                                // Log the received Modbus value, not the calculated weight
+                                logToBrowser("WS: Set Target Modbus Torque: %d (corresponds to %.1f %%)\n", currentTargetTorque, currentTargetTorque/10.0);
                             }
                         }
                     } else if (strcmp(command, "enableServo") == 0) {
@@ -754,7 +723,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                     } else if (strcmp(command, "disableServo") == 0) {
                         Serial.println("WS: Received disableServo command.");
                         servoIsEnabledTarget = false;
-                        currentTargetTorque = 0; // Reset max torque on disable command
+                        currentTargetTorque = 0; // Reset internal torque target on disable command
                     } else if (strcmp(command, "getStatus") == 0) {
                         Serial.println("WS: Received getStatus command.");
                          wsJsonTx.clear(); 
@@ -840,9 +809,9 @@ void setupApp() {
     isInAPMode = false;
     logToBrowser("\nStarting Application Setup (STA Mode)...");
 
-    // write large homing position to positive limit to prevent false alarms 
-    homingPosition = 999999999;
-
+    // set large homing position to prevent false alarms
+    homingPosition = 999999;
+    
     // Load saved homing position
     // preferences.begin("servo", true); // read-only
     // homingPosition = preferences.getLong("homingPos", 999999); // Default large value if not set
@@ -1110,7 +1079,7 @@ void appLoop() {
 
             // --- 4b. Send Torque (if enabled) ---
             if (servoIsEnabledActual) {
-                // Always send the torque value from the slider
+                // Always send the torque value from the slider (converted from weight in JS)
                 // The servo itself handles the software limits
                 writeRegister(REG_TARGET_TORQUE, currentTargetTorque);
             }
