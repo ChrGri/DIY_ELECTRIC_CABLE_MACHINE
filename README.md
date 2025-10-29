@@ -132,15 +132,7 @@ Install [PlatformIO](https://platformio.org/install/ide?install=vscode) in Visua
 
 [ ] Read servo alarms
 
-[ ] Plot position over time
-
-[ ] Convert torque to weight
-
 [ ] Add eccentric resistance mode (higher resistance on release).
-
-[ ] Implement a BLE (Bluetooth Low Energy) service for a mobile app.
-
-[ ] Add a load cell to measure force accurately and provide real-time feedback.
 
 [ ] Workout tracking and history.
 
