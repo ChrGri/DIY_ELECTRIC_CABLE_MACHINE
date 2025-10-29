@@ -2,23 +2,13 @@
  * Modbus Servo Control via Web Interface - ESP32-S3
  *
  * Implements a simple WiFi Manager, Modbus control, WebSocket interface,
- * and sends log messages to the web browser via WebSocket.
- *
- * Modbus Addresses based on user feedback (ParamName = Hex Addr).
- * Servo Enable/Disable via Modbus Register 0x0411.
- * Monitors correct Servo Status Register (U41.0A -> 0x410A).
- * Increased Modbus read interval and improved error handling.
- * Added detailed logging for enableCmdSent flag.
+ * and sends log messages/status data to the web browser via WebSocket.
+ * Includes two live charts (Position/Time, Voltage/Time) using Chart.js.
  *
  * *** MODIFIED ***
- * - Increased torque slider max to 200% (value 2000)
- * - Added Homing functionality (Button, WS command, State Machine)
- * - Added Homing race condition fix (WAIT_FOR_RUNNING)
- * - Added EMERGENCY STOP button
- * - Added writeRegister32bit() helper function for 32-bit registers like C06.08
- * - Changed FFB logic to use drive's internal software limits (C06.07, C06.08)
- * - Added deactivation of Out of Control Protection (C06.20)
- * - Added reading and display of IGBT and Motor Temperature (U40.30, U40.31)
+ * - Split the single chart into two separate charts: Position vs Time and Voltage vs Time.
+ * - Implemented a rolling 20-second time window for both charts.
+ * - Translated all comments and UI text to English.
  */
 
 #include <WiFi.h>
@@ -30,7 +20,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 
-// --- Pin-Definitionen (ESP32-S3) ---
+// --- Pin Definitions (ESP32-S3) ---
 #define RXD2_PIN 6 // Modbus Serial2 RX
 #define TXD2_PIN 4 // Modbus Serial2 TX
 
@@ -40,12 +30,12 @@ String savedSSID = "";
 String savedPassword = "";
 const char *apSSID = "ServoSetup";
 
-// --- Modbus Konfiguration ---
+// --- Modbus Configuration ---
 #define SERVO_DRIVE_SLAVE_ID 1
 ModbusMaster node;
 HardwareSerial ModbusSerial(2);
 
-// --- Modbus Register Adressen (Hex) ---
+// --- Modbus Register Addresses (Hex) ---
 #define REG_CONTROL_MODE 0x0000        // C00.00
 #define REG_TARGET_SPEED 0x0321        // C03.21
 #define REG_TORQUE_REF_SRC 0x0340      // C03.40
@@ -53,8 +43,8 @@ HardwareSerial ModbusSerial(2);
 #define REG_MODBUS_SERVO_ON 0x0411     // Servo Enable/Disable (Write)
 #define REG_DI5_FUNCTION 0x0410        // C04.10
 #define REG_SOFT_LIMIT_ENABLE 0x0607   // C06.07 (1=Enable +/- Limits)
-#define REG_SOFT_LIMIT_NEG 0x0608      // C06.08 (32-bit Negative Limit) - Alias für Klarheit
-#define REG_C06_08 REG_SOFT_LIMIT_NEG  // Beibehaltung des alten Namens zur Kompatibilität
+#define REG_SOFT_LIMIT_NEG 0x0608      // C06.08 (32-bit Negative Limit) - Alias for clarity
+#define REG_C06_08 REG_SOFT_LIMIT_NEG  // Keep old name for compatibility
 #define REG_OUT_OF_CONTROL_PROT 0x0620 // C06.20 (Out of Control Protection Mode)
 #define REG_SPEED_FEEDBACK 0x4001      // U40.01
 #define REG_TORQUE_FEEDBACK 0x4003     // U40.03
@@ -63,18 +53,18 @@ HardwareSerial ModbusSerial(2);
 #define REG_RMS_CURRENT 0x400C         // U40.0C
 #define REG_POSITION_FEEDBACK_L 0x4016 // U40.16 (Low)
 #define REG_POSITION_FEEDBACK_H 0x4017 // U40.16 (High)
-#define REG_TEMP_IGBT 0x4030           // U40.30 (IGBT Temperature in 0.1 C) *** NEU ***
-#define REG_TEMP_MOTOR 0x4031          // U40.31 (Motor Temperature in 0.1 C) *** NEU ***
+#define REG_TEMP_IGBT 0x4030           // U40.30 (IGBT Temperature in 0.1 C)
+#define REG_TEMP_MOTOR 0x4031          // U40.31 (Motor Temperature in 0.1 C)
 #define REG_SERVO_STATUS 0x410A        // U41.0A
 
 // --- Webserver & WebSocket ---
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
-StaticJsonDocument<350> wsJsonTx; // Größe leicht erhöht für Temp-Werte
+StaticJsonDocument<350> wsJsonTx; // Slightly increased size for temp values
 StaticJsonDocument<128> wsJsonRx;
 #define MAX_LOG_MSG_LENGTH 150
 
-// --- Globale Zustandsvariablen ---
+// --- Global State Variables ---
 bool servoIsEnabledTarget = false;
 bool servoIsEnabledActual = false;
 bool modbusOk = false;
@@ -84,12 +74,12 @@ int16_t actualTorque = 0;
 uint16_t busVoltage = 0;
 int16_t rmsCurrent = 0;
 int32_t actualPosition = 0;
-int16_t igbtTemp = 0;           // *** NEU ***
-int16_t motorTemp = 0;          // *** NEU ***
+int16_t igbtTemp = 0;
+int16_t motorTemp = 0;
 uint16_t actualServoStatus = 0;
 uint16_t diStatus = 0;
-int modbusConsecutiveErrors = 0; // Zähler für Modbus-Fehler
-const int MAX_MODBUS_ERRORS = 5; // Anzahl Fehler, bevor Verbindung als schlecht gilt
+int modbusConsecutiveErrors = 0; // Counter for Modbus errors
+const int MAX_MODBUS_ERRORS = 5; // Number of errors before connection is considered bad
 bool enableCmdSent = false;      // Track if enable command was sent
 
 // --- Homing State ---
@@ -101,15 +91,15 @@ enum HomingState {
     HOMING_DONE
 };
 volatile HomingState homingState = HOMING_IDLE;
-int32_t homingPosition = 999999; // Wird aus Preferences geladen oder durch Homing gesetzt
-const int16_t HOMING_SPEED_RPM = 120; // Homing-Geschwindigkeit 60 U/min
-const int16_t HOMING_TORQUE_THRESHOLD = 200; // 10.0% Drehmoment (als "Strom"-Schwellenwert)
+int32_t homingPosition = 0; // Loaded from Preferences or set by Homing
+const int16_t HOMING_SPEED_RPM = 120; // Homing speed 120 RPM
+const int16_t HOMING_TORQUE_THRESHOLD = 200; // 20.0% Torque (as "current" threshold)
 
-// Timer-Variablen für Homing
+// Timer variables for Homing
 unsigned long homingStartTime = 0;
-const long HOMING_START_TIMEOUT = 2000; // 2 Sekunden Warten auf "Running"
+const long HOMING_START_TIMEOUT = 2000; // 2 seconds wait for "Running"
 
-// Zeitsteuerung
+// Timing control
 unsigned long lastModbusReadTime = 0;
 unsigned long lastModbusCheckTime = 0;
 unsigned long lastWsSendTime = 0;
@@ -118,19 +108,19 @@ const long modbusCheckInterval = 2000;
 const long wsSendInterval = 100;
 unsigned long wifiReconnectTimer = 0;
 
-// Flag, ob wir im AP-Modus sind
+// Flag if we are in AP mode
 bool isInAPMode = false;
 
-// --- Hilfsfunktion für Logging ---
+// --- Helper function for logging ---
 void logToBrowser(const char* format, ...) {
     char msgBuffer[MAX_LOG_MSG_LENGTH];
     va_list args;
     va_start(args, format);
     vsnprintf(msgBuffer, sizeof(msgBuffer), format, args);
     va_end(args);
-    Serial.println(msgBuffer); // Immer an Serial
+    Serial.println(msgBuffer); // Always to Serial
     if (!isInAPMode && ws.count() > 0 && WiFi.status() == WL_CONNECTED) {
-        bool likely_in_ws_callback = false; // Vereinfachte Annahme
+        bool likely_in_ws_callback = false; // Simplified assumption
         if (!likely_in_ws_callback) {
              wsJsonTx.clear(); wsJsonTx["type"] = "log"; wsJsonTx["message"] = msgBuffer;
              String jsonString; serializeJson(wsJsonTx, jsonString); ws.textAll(jsonString);
@@ -138,16 +128,20 @@ void logToBrowser(const char* format, ...) {
     }
 }
 
-// --- HTML für Hauptseite (mit Log-Fenster - *** GEÄNDERT ***) ---
+// --- HTML for main page (with log window - *** UPDATED: Two Charts, English Text ***) ---
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
   <title>ESP32 Servo Control</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment@^2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@^1"></script>
+
   <style>
     body { font-family: Arial, sans-serif; padding: 15px; background-color: #f4f4f4; }
     h2 { color: #333; text-align: center; }
-    .container { max-width: 500px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    .container { max-width: 700px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); } /* Width adjusted */
     .control-group { margin-bottom: 20px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type=range] { width: 100%; }
@@ -176,19 +170,20 @@ const char index_html[] PROGMEM = R"rawliteral(
     .di-on { background-color: limegreen; }
     .di-off { background-color: lightgrey; }
     #logOutput { width: 98%; height: 150px; background-color: #333; color: #fff; font-family: monospace; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; margin-top: 15px; overflow-y: scroll; padding: 5px; }
+    .chart-container { margin-top: 30px; height: 250px; /* Set height for charts */ } 
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>A6-RS Servo Steuerung</h2>
+    <h2>A6-RS Servo Control</h2>
     <div class="control-group">
-      <label for="torqueSlider">Maximales Drehmoment (%):</label> 
+      <label for="torqueSlider">Maximum Torque (%):</label> <!-- Label changed -->
       <input type="range" id="torqueSlider" min="0" max="2000" value="0" step="10">
       <div id="torqueValue" class="value-display">0.0 %</div>
     </div>
     <div class="control-group">
-      <button id="enableBtn" class="btn btn-enable">Aktivieren</button>
-      <button id="disableBtn" class="btn btn-disable">Deaktivieren</button>
+      <button id="enableBtn" class="btn btn-enable">Enable</button>
+      <button id="disableBtn" class="btn btn-disable">Disable</button>
       <button id="homeBtn" class="btn btn-home">Homing</button>
     </div>
     <div class="control-group">
@@ -199,11 +194,10 @@ const char index_html[] PROGMEM = R"rawliteral(
       <p>Modbus: <span id="modbusStatus" class="status-badge status-modbus-fail">Checking...</span></p>
       <p>Servo: <span id="servoStatus" class="status-badge status-off">Unknown</span> (<span id="servoStatusCode">?</span>)</p>
       <p>Position: <strong id="actualPosition">0</strong></p>
-      <p>Geschwindigkeit: <strong id="actualSpeed">0</strong> rpm</p>
-      <p>Drehmoment Ist: <strong id="actualTorque">0.0</strong> %</p>
-      <p>Strom: <strong id="rmsCurrent">0.0</strong> A</p>
-      <p>Bus Spannung: <strong id="busVoltage">0.0</strong> V</p>
-      <!-- *** NEUE Temperaturanzeigen *** -->
+      <p>Speed: <strong id="actualSpeed">0</strong> rpm</p>
+      <p>Actual Torque: <strong id="actualTorque">0.0</strong> %</p>
+      <p>Current: <strong id="rmsCurrent">0.0</strong> A</p>
+      <p>Bus Voltage: <strong id="busVoltage">0.0</strong> V</p>
       <p>IGBT Temp: <strong id="igbtTemp">0.0</strong> &deg;C</p>
       <p>Motor Temp: <strong id="motorTemp">0.0</strong> &deg;C</p>
       <p>DIs (1-8):
@@ -214,6 +208,17 @@ const char index_html[] PROGMEM = R"rawliteral(
          (<span id="diValueHex">0x00</span>)
       </p>
     </div>
+
+     <!-- *** Two Chart Canvases *** -->
+     <div class="chart-container">
+        <h4>Position</h4>
+        <canvas id="posChart"></canvas>
+     </div>
+      <div class="chart-container">
+        <h4>Bus Voltage</h4>
+        <canvas id="voltChart"></canvas>
+     </div>
+
      <textarea id="logOutput" readonly></textarea>
   </div>
 <script>
@@ -224,12 +229,39 @@ const char index_html[] PROGMEM = R"rawliteral(
   var logTextArea = null;
   const MAX_LOG_LINES = 100;
 
+  // *** Separate Chart Variables ***
+  var posChart = null;
+  var voltChart = null;
+  var commonLabels = []; // Common timestamp axis
+  var posChartData = {
+    labels: commonLabels,
+    datasets: [{
+            label: 'Position (Steps)',
+            data: [],
+            borderColor: 'rgb(75, 192, 192)',
+            backgroundColor: 'rgba(75, 192, 192, 0.5)',
+            tension: 0.1,
+        }]
+  };
+   var voltChartData = {
+    labels: commonLabels,
+    datasets: [{
+            label: 'Bus Voltage (V)',
+            data: [],
+            borderColor: 'rgb(255, 99, 132)',
+            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+            tension: 0.1,
+        }]
+  };
+  const TIME_WINDOW_MS = 20000; // 20 seconds
+
   window.addEventListener('load', onLoad);
 
   function onLoad(event) {
     logTextArea = document.getElementById('logOutput');
     initWebSocket();
     initUI();
+    initCharts(); // Initialize charts
   }
 
   function initUI() {
@@ -240,6 +272,61 @@ const char index_html[] PROGMEM = R"rawliteral(
     document.getElementById('homeBtn').addEventListener('click', onHomeClick);
     document.getElementById('estopBtn').addEventListener('click', onEstopClick); 
     updateButtonStates(false, false); 
+  }
+
+  // *** Initializes BOTH Charts ***
+  function initCharts() {
+    const posCtx = document.getElementById('posChart').getContext('2d');
+    posChart = new Chart(posCtx, {
+        type: 'line',
+        data: posChartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false, 
+            scales: {
+                x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } },
+                y: { title: { display: true, text: 'Position (Steps)' } }
+            },
+            plugins: { legend: { display: false }, title: { display: false } }
+        }
+    });
+
+    const voltCtx = document.getElementById('voltChart').getContext('2d');
+    voltChart = new Chart(voltCtx, {
+        type: 'line',
+        data: voltChartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false, 
+            scales: {
+                x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } },
+                y: { title: { display: true, text: 'Bus Voltage (V)' }, suggestedMin: 0, suggestedMax: 400 } // Y-axis for voltage
+            },
+            plugins: { legend: { display: false }, title: { display: false } }
+        }
+    });
+  }
+
+  // *** Adds data to BOTH charts and enforces time window ***
+  function addDataToCharts(timestamp, position, voltage) {
+    if (!posChart || !voltChart) return;
+
+    commonLabels.push(timestamp);
+    posChartData.datasets[0].data.push(position); 
+    voltChartData.datasets[0].data.push(voltage);
+
+    // Enforce time window (remove oldest data if > 20 seconds)
+    const now = Date.now();
+    while (commonLabels.length > 0 && (now - commonLabels[0] > TIME_WINDOW_MS)) {
+        commonLabels.shift(); 
+        posChartData.datasets[0].data.shift(); 
+        voltChartData.datasets[0].data.shift(); 
+    }
+
+    posChart.update('none'); // Update without animation
+    voltChart.update('none'); // Update without animation
   }
 
   function initWebSocket() {
@@ -299,12 +386,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
 
       if (data.type === 'status') {
+        // Update status indicators (as before)
         document.getElementById('actualPosition').textContent = data.pos;
         document.getElementById('actualSpeed').textContent = data.spd;
         document.getElementById('actualTorque').textContent = (data.trq / 10.0).toFixed(1);
         document.getElementById('rmsCurrent').textContent = (data.cur / 10.0).toFixed(1);
         document.getElementById('busVoltage').textContent = (data.vbus / 10.0).toFixed(1);
-        // *** NEU: Temperaturen anzeigen ***
         document.getElementById('igbtTemp').textContent = (data.igbtTemp / 10.0).toFixed(1); 
         document.getElementById('motorTemp').textContent = (data.motorTemp / 10.0).toFixed(1); 
 
@@ -333,6 +420,10 @@ const char index_html[] PROGMEM = R"rawliteral(
             let indicator = document.getElementById('di' + i);
             indicator.className = ((diVal >> (i - 1)) & 1) ? 'di-indicator di-on' : 'di-indicator di-off';
         }
+
+        // *** Update charts with new data ***
+        addDataToCharts(Date.now(), data.pos, data.vbus / 10.0);
+
       }
     } catch (e) {
       console.error('Error parsing JSON:', e, 'Data:', event.data);
@@ -340,7 +431,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
   }
 
-  function onSliderInput(event) {
+    function onSliderInput(event) {
     targetTorque = parseInt(event.target.value);
     document.getElementById('torqueValue').textContent = (targetTorque / 10.0).toFixed(1) + ' %';
   }
@@ -398,20 +489,21 @@ const char index_html[] PROGMEM = R"rawliteral(
      document.getElementById('estopBtn').disabled = !modbusIsOk;
      document.getElementById('estopBtn').classList.toggle('btn-disabled', !modbusIsOk);
   }
+
 </script>
 </body>
 </html>
 )rawliteral";
 
-// --- HTML für AP-Modus Konfigurationsseite (unverändert) ---
+// --- HTML for AP mode configuration page (*** UPDATED: English Text ***) ---
 const char ap_mode_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html><head><title>Servo WiFi Setup</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial,sans-serif;padding:15px;background-color:#f4f4f4;text-align:center;}h2{color:#333;}.container{max-width:400px;margin:30px auto;background:#fff;padding:20px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.1);}.form-group{margin-bottom:15px;text-align:left;}label{display:block;margin-bottom:5px;font-weight:bold;}input[type=text],input[type=password]{width:95%;padding:10px;border:1px solid #ccc;border-radius:4px;}.btn{padding:10px 20px;font-size:1em;cursor:pointer;border:none;border-radius:5px;background-color:#007bff;color:white;}.msg{margin-top:15px;color:green;font-weight:bold;}</style></head><body><div class="container"><h2>Servo WiFi Konfiguration</h2><p>Bitte geben Sie Ihre WLAN-Zugangsdaten ein.</p><form action="/save" method="POST"><div class="form-group"><label for="ssid">WLAN Name (SSID):</label><input type="text" id="ssid" name="ssid" required></div><div class="form-group"><label for="pass">WLAN Passwort:</label><input type="password" id="pass" name="pass" required></div><button type="submit" class="btn">Speichern & Neu starten</button></form><div id="message" class="msg"></div></div></body></html>
+<!DOCTYPE HTML><html><head><title>Servo WiFi Setup</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial,sans-serif;padding:15px;background-color:#f4f4f4;text-align:center;}h2{color:#333;}.container{max-width:400px;margin:30px auto;background:#fff;padding:20px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.1);}.form-group{margin-bottom:15px;text-align:left;}label{display:block;margin-bottom:5px;font-weight:bold;}input[type=text],input[type=password]{width:95%;padding:10px;border:1px solid #ccc;border-radius:4px;}.btn{padding:10px 20px;font-size:1em;cursor:pointer;border:none;border-radius:5px;background-color:#007bff;color:white;}.msg{margin-top:15px;color:green;font-weight:bold;}</style></head><body><div class="container"><h2>Servo WiFi Configuration</h2><p>Please enter your WiFi credentials.</p><form action="/save" method="POST"><div class="form-group"><label for="ssid">WiFi Name (SSID):</label><input type="text" id="ssid" name="ssid" required></div><div class="form-group"><label for="pass">WiFi Password:</label><input type="password" id="pass" name="pass" required></div><button type="submit" class="btn">Save & Restart</button></form><div id="message" class="msg"></div></div></body></html>
 )rawliteral";
 
 
-// --- Modbus Funktionen ---
+// --- Modbus Functions ---
 
-// Schreibt ein 16-bit Register
+// Writes a 16-bit register
 bool writeRegister(uint16_t reg, int16_t value) {
     if (!modbusOk && millis() > 5000) { return false; }
     uint8_t result;
@@ -429,7 +521,13 @@ bool writeRegister(uint16_t reg, int16_t value) {
 }
 
 /**
- * @brief Schreibt einen 32-bit Wert (int32_t) in zwei aufeinanderfolgende 16-bit Modbus-Register.
+ * @brief Writes a 32-bit value (int32_t) into two consecutive 16-bit Modbus registers.
+ * @param reg The starting register address (e.g., 0x0608).
+ * @param value The 32-bit value to write.
+ * @return true on success, false on failure.
+ * @note According to A6 servo documentation: "high 16 bits are stored in high address, low 16 bits are stored in low address."
+ * Register (n)   = Low Word
+ * Register (n+1) = High Word
  */
 bool writeRegister32bit(uint16_t reg, int32_t value) {
     if (!modbusOk && millis() > 5000) { return false; }
@@ -441,7 +539,7 @@ bool writeRegister32bit(uint16_t reg, int32_t value) {
     node.setTransmitBuffer(1, highWord);
 
     uint8_t result;
-    result = node.writeMultipleRegisters(reg, 2); // Schreibt 2 Register ab Adresse 'reg'
+    result = node.writeMultipleRegisters(reg, 2); // Writes 2 registers starting from address 'reg'
 
     if (result != node.ku8MBSuccess) {
         logToBrowser("MB Write32 FAIL: Reg=0x%04X, Val=%ld, Code=0x%X", reg, value, result);
@@ -456,21 +554,21 @@ bool writeRegister32bit(uint16_t reg, int32_t value) {
 }
 
 
-// Aktiviert Servo über Modbus
+// Enables servo via Modbus
 bool enableServoModbus() {
     logToBrowser("Attempting to enable Servo via Modbus (0x0411 = 1)...");
     if (writeRegister(REG_MODBUS_SERVO_ON, 1)) {
         logToBrowser("-> Modbus enable command sent successfully.");
-        delay(50); // Optional: Kurze Pause nach Enable
+        delay(50); // Optional: Short pause after enable
         return true;
     } else {
         logToBrowser("-> Modbus enable command FAILED.");
-        delay(50); // Optional: Kurze Pause nach Fehler
+        delay(50); // Optional: Short pause after failure
         return false;
     }
 }
 
-// Deaktiviert Servo über Modbus
+// Disables servo via Modbus
 bool disableServoModbus() {
     logToBrowser("Attempting to disable Servo via Modbus (0x0411 = 0)...");
     bool success = writeRegister(REG_MODBUS_SERVO_ON, 0); 
@@ -478,41 +576,42 @@ bool disableServoModbus() {
     else if (success) { logToBrowser("-> Modbus disable command sent successfully."); }
 
     if(currentTargetTorque != 0) {
-        // Versuche, das Drehmoment auf 0 zu setzen, ignoriere Fehler hier, da wir sowieso deaktivieren
+        // Try to set torque to 0, ignore errors here since we are disabling anyway
         writeRegister(REG_TARGET_TORQUE, 0); 
-        currentTargetTorque = 0; // Setze internen Wert trotzdem zurück
+        currentTargetTorque = 0; // Reset internal value regardless
         logToBrowser("-> Set MAX torque to 0 after disable.");
     }
 
     if (!success || !modbusOk) {
-        actualServoStatus = (actualServoStatus == 3) ? 3 : 0; 
+        actualServoStatus = (actualServoStatus == 3) ? 3 : 0; // Fault or Not Ready
         servoIsEnabledActual = false;
     }
     return success;
 }
 
-// Prüft die Modbus Verbindung (wird seltener aufgerufen)
+// Checks Modbus connection (called less frequently)
 bool checkModbusConnection() {
     uint8_t result;
     result = node.readHoldingRegisters(REG_CONTROL_MODE, 1);
     if (result == node.ku8MBSuccess) {
         if (!modbusOk) logToBrowser("MB Connection Check OK (Read 0x0000 successful).");
         modbusOk = true;
-        modbusConsecutiveErrors = 0;
+        modbusConsecutiveErrors = 0; // Reset error counter
         return true;
     } else {
+        // Log only if status changed or during startup
         if (modbusOk || millis() < 6000) {
             logToBrowser("MB Connection Check FAIL reading 0x0000! Code: 0x%X", result);
         }
         modbusOk = false;
         actualServoStatus = 0; servoIsEnabledTarget = false; servoIsEnabledActual = false;
-        modbusConsecutiveErrors = MAX_MODBUS_ERRORS;
+        modbusConsecutiveErrors = MAX_MODBUS_ERRORS; // Assume max errors if check fails
         return false;
     }
 }
 
 #define WAIT_TIME_BEFORE_TRANSMITTING_NEXT_DATA_IN_MS 2
-// Liest die Servo Statusdaten via Modbus
+// Reads servo status data via Modbus
 bool readServoData() {
     if (!modbusOk && modbusConsecutiveErrors >= MAX_MODBUS_ERRORS) {
         return false;
@@ -561,7 +660,7 @@ bool readServoData() {
     }
     delay(WAIT_TIME_BEFORE_TRANSMITTING_NEXT_DATA_IN_MS); 
     
-    // *** NEU: Temperaturen lesen ***
+    // Read Temperatures
     result = node.readHoldingRegisters(REG_TEMP_IGBT, 1);
     if (result == node.ku8MBSuccess) igbtTemp = node.getResponseBuffer(0);
     else { readSuccessCurrentCycle = false; }
@@ -570,12 +669,13 @@ bool readServoData() {
     result = node.readHoldingRegisters(REG_TEMP_MOTOR, 1);
     if (result == node.ku8MBSuccess) motorTemp = node.getResponseBuffer(0);
     else { readSuccessCurrentCycle = false; }
-    // Kein Delay nach der letzten Leseoperation nötig
+    // No delay needed after the last read
     // --- End Read Sequence ---
 
     if (!readSuccessCurrentCycle) {
         modbusConsecutiveErrors++;
-        if (modbusConsecutiveErrors <= 5 || modbusConsecutiveErrors == MAX_MODBUS_ERRORS) {
+        // Log reduced to avoid flooding
+        if (modbusConsecutiveErrors == 1 || modbusConsecutiveErrors == MAX_MODBUS_ERRORS) {
              logToBrowser("Modbus read cycle failed (%d consecutive)", modbusConsecutiveErrors);
         }
         if (modbusConsecutiveErrors >= MAX_MODBUS_ERRORS) {
@@ -584,15 +684,17 @@ bool readServoData() {
             }
             modbusOk = false;
             actualServoStatus = 0; servoIsEnabledTarget = false; servoIsEnabledActual = false;
+            // Reset Temps on failure
+            igbtTemp = 0; motorTemp = 0;
         }
         return false; 
     } else {
-        if (!modbusOk && modbusConsecutiveErrors == 0) { 
+        if (!modbusOk) { // Log only when status changes
              logToBrowser(">>> Modbus communication OK <<<");
         }
         modbusConsecutiveErrors = 0; 
         modbusOk = true;
-        servoIsEnabledActual = (actualServoStatus == 2);
+        servoIsEnabledActual = (actualServoStatus == 2); // Status 2 means 'Running'
         if(tempStatus != actualServoStatus) logToBrowser("Servo Status Changed (0x410A) = %d (0=NR,1=RD,2=RUN,3=FLT)", actualServoStatus);
         return true; 
     }
@@ -618,8 +720,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
             wsJsonTx["trq"] = actualTorque; 
             wsJsonTx["cur"] = rmsCurrent; 
             wsJsonTx["vbus"] = busVoltage;
-            wsJsonTx["igbtTemp"] = igbtTemp;     // *** NEU ***
-            wsJsonTx["motorTemp"] = motorTemp;   // *** NEU ***
+            wsJsonTx["igbtTemp"] = igbtTemp;     
+            wsJsonTx["motorTemp"] = motorTemp;   
             wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); 
             { String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString); }
             break;
@@ -666,8 +768,8 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                          wsJsonTx["trq"] = actualTorque; 
                          wsJsonTx["cur"] = rmsCurrent; 
                          wsJsonTx["vbus"] = busVoltage;
-                         wsJsonTx["igbtTemp"] = igbtTemp;     // *** NEU ***
-                         wsJsonTx["motorTemp"] = motorTemp;   // *** NEU ***
+                         wsJsonTx["igbtTemp"] = igbtTemp;     
+                         wsJsonTx["motorTemp"] = motorTemp;   
                          wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); 
                          { String jsonString; serializeJson(wsJsonTx, jsonString); client->text(jsonString); }
                     } else if (strcmp(command, "setDI5Func") == 0) {
@@ -692,9 +794,9 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
                          
                          servoIsEnabledTarget = false;
                          currentTargetTorque = 0; 
-                         homingState = HOMING_IDLE; 
+                         homingState = HOMING_IDLE; // Immediately abort homing
                          
-                         disableServoModbus(); 
+                         disableServoModbus(); // Send disable command immediately
                      }
                 }
             }
@@ -705,7 +807,7 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
     }
 }
 
-// --- Setup für den AP-Modus (unverändert) ---
+// --- Setup for AP Mode (unchanged) ---
 void setupAPMode() {
     isInAPMode = true;
     Serial.println("\nStarting Access Point Mode...");
@@ -733,13 +835,19 @@ void setupAPMode() {
     server.begin(); Serial.println("Configuration server started.");
 }
 
-// --- Setup für den normalen App-Betrieb (STA-Modus) ---
+// --- Setup for normal app operation (STA Mode) ---
 void setupApp() {
     isInAPMode = false;
     logToBrowser("\nStarting Application Setup (STA Mode)...");
 
-    // set initial homing position to large value thus alarm is not immediately triggered
-    homingPosition = 999999; // Lade jetzt aus Preferences
+    // write large homing position to positive limit to prevent false alarms 
+    homingPosition = 999999999;
+
+    // Load saved homing position
+    // preferences.begin("servo", true); // read-only
+    // homingPosition = preferences.getLong("homingPos", 999999); // Default large value if not set
+    // preferences.end();
+    // logToBrowser("Loaded homing position: %d", homingPosition);
 
     // Modbus Setup
     ModbusSerial.begin(57600, SERIAL_8N1, RXD2_PIN, TXD2_PIN);
@@ -756,24 +864,24 @@ void setupApp() {
         disableServoModbus(); // Ensure servo starts disabled
         delay(100);
         
-        // Grundkonfiguration für Torque Mode
+        // Basic configuration for Torque Mode
         if (!writeRegister(REG_CONTROL_MODE, 2)) logToBrowser("Failed to set Control Mode (2)!");
         if (!writeRegister(REG_TORQUE_REF_SRC, 0)) logToBrowser("Failed to set Torque Ref Source (0)!");
         if (!writeRegister(REG_TARGET_TORQUE, 0)) logToBrowser("Failed to set initial Torque to 0!");
 
-        // Software Limits setzen
-        logToBrowser("Setting Positive Software Limit (C06.08) to %d...", homingPosition);
+        // Set Software Limits
+        logToBrowser("Setting Negative Software Limit (C06.08) to %d...", homingPosition);
         if (!writeRegister32bit(REG_SOFT_LIMIT_NEG, homingPosition)) {
-             logToBrowser("FAILED to write Positive Software Limit!");
+             logToBrowser("FAILED to write Negative Software Limit!");
         }
         logToBrowser("Enabling Software Limits (C06.07 = 1)...");
-        if (!writeRegister(REG_SOFT_LIMIT_ENABLE, 1)) { // Wert 1 aktiviert +/- Limits
+        if (!writeRegister(REG_SOFT_LIMIT_ENABLE, 1)) { // Value 1 enables +/- Limits
             logToBrowser("FAILED to enable Software Limits!");
         } else {
              logToBrowser("Software Limits enabled (Positive=0, Negative=%d)", homingPosition);
         }
 
-        // Out of Control Protection deaktivieren
+        // Disable Out of Control Protection
         logToBrowser("Disabling Out of Control Protection (C06.20 = 0)...");
         if (!writeRegister(REG_OUT_OF_CONTROL_PROT, 0)) {
             logToBrowser("FAILED to disable Out of Control Protection!");
@@ -790,16 +898,16 @@ void setupApp() {
     server.begin();
     logToBrowser("HTTP server started. Open browser to http://%s", WiFi.localIP().toString().c_str());
 
-    // Initialisiere Timer und Zustände
+    // Initialize timers and states
     lastModbusReadTime = millis(); lastModbusCheckTime = millis(); lastWsSendTime = millis();
     servoIsEnabledTarget = false; servoIsEnabledActual = false; currentTargetTorque = 0; actualServoStatus = 0; modbusConsecutiveErrors = 0;
     homingState = HOMING_IDLE; 
 }
 
-// --- Haupt-Setup ---
+// --- Main Setup ---
 void setup() {
-    // Reduce TX power to 10 dBm (value in quarter-dBm units → 10 * 4 = 40)
-    esp_wifi_set_max_tx_power(34);  // 8 dBm
+    // Reduce TX power to 8.5 dBm (value in quarter-dBm units -> 8.5 * 4 = 34)
+    esp_wifi_set_max_tx_power(34);  
 
 
     Serial.begin(115200);
@@ -824,11 +932,11 @@ void setup() {
     if (!connected) { setupAPMode(); }
 }
 
-// --- Haupt-Loop der App ---
+// --- Main App Loop ---
 void appLoop() {
     unsigned long currentTime = millis();
 
-    // 1. Modbus Verbindung prüfen (wenn nicht ok und Intervall abgelaufen)
+    // 1. Check Modbus connection (if not ok and interval elapsed)
     if (!modbusOk && (currentTime - lastModbusCheckTime >= modbusCheckInterval)) {
         lastModbusCheckTime = currentTime;
         checkModbusConnection(); 
@@ -840,11 +948,11 @@ void appLoop() {
             writeRegister(REG_TORQUE_REF_SRC, 0);
             writeRegister32bit(REG_SOFT_LIMIT_NEG, homingPosition);
             writeRegister(REG_SOFT_LIMIT_ENABLE, 1);
-            writeRegister(REG_OUT_OF_CONTROL_PROT, 0); // Auch hier erneut setzen
+            writeRegister(REG_OUT_OF_CONTROL_PROT, 0); // Re-apply this setting too
         }
     }
 
-    // 2. Modbus Daten lesen (häufig), nur wenn Verbindung OK (oder Fehlerzähler < Max)
+    // 2. Read Modbus data (frequently), only if connection OK (or error counter < Max)
     if (modbusOk || modbusConsecutiveErrors < MAX_MODBUS_ERRORS) {
         if (currentTime - lastModbusReadTime >= modbusReadInterval) {
             lastModbusReadTime = currentTime;
@@ -852,10 +960,10 @@ void appLoop() {
         }
     }
 
-    // 3. Homing State Machine (hat Vorrang)
+    // 3. Homing State Machine (has priority)
     if (homingState != HOMING_IDLE) {
 
-        // sensorless homing requires data to be obtained from the servo. If modbus communication fails, stop homing procedure.  
+        // Sensorless homing requires data from the servo. If Modbus fails, stop homing.
         if (!modbusOk) {
             logToBrowser("Homing FAILED: Modbus connection lost.");
             homingState = HOMING_IDLE;
@@ -932,7 +1040,7 @@ void appLoop() {
                 disableServoModbus(); 
                 delay(50); 
                 writeRegister(REG_CONTROL_MODE, 2); 
-                writeRegister(REG_TARGET_TORQUE, 0); // Sicherstellen, dass Torque 0 ist
+                writeRegister(REG_TARGET_TORQUE, 0); // Ensure torque is 0
                 writeRegister(REG_TARGET_SPEED, 0); 
 
                 logToBrowser("Setting Negative Software Limit (C06.08) to new position %d...", homingPosition);
@@ -951,7 +1059,7 @@ void appLoop() {
                 
                 logToBrowser("Homing Finished. Position set to %d.", homingPosition);
                 
-                preferences.begin("servo", false); 
+                preferences.begin("servo", false); // read-write
                 preferences.putLong("homingPos", homingPosition);
                 preferences.end();
                 logToBrowser("Homing position %d saved to flash.", homingPosition);
@@ -970,11 +1078,11 @@ void appLoop() {
     }
 
 
-    // 4. Servo Enable/Disable & Torque Senden (nur wenn kein Homing aktiv ist)
+    // 4. Servo Enable/Disable & Torque Sending (only if not homing)
     if (homingState == HOMING_IDLE) {
         if (modbusOk) {
             
-            // --- 4a. Enable/Disable Befehlslogik ---
+            // --- 4a. Enable/Disable Command Logic ---
             if (servoIsEnabledTarget && !servoIsEnabledActual) {
                 if (actualServoStatus == 1 && !enableCmdSent) {
                      logToBrowser("Enable Condition Met: Target=ON, Actual=OFF, Status=1, CmdSent=FALSE -> Sending Enable Command...");
@@ -983,7 +1091,7 @@ void appLoop() {
                     }
                 }
                 else if (!enableCmdSent && (currentTime % 2000 < modbusReadInterval) ) { 
-                     // Log-Level reduziert
+                     // Log level reduced
                      // logToBrowser("Enable Check: Target=ON, Actual=OFF, Status=%d, CmdSent=%s -> Conditions not met.",
                      //              actualServoStatus, enableCmdSent ? "true" : "false");
                 }
@@ -1000,10 +1108,13 @@ void appLoop() {
                  }
             }
 
-            // --- 4b. Drehmoment senden (wenn aktiv) ---
+            // --- 4b. Send Torque (if enabled) ---
             if (servoIsEnabledActual) {
+                // Always send the torque value from the slider
+                // The servo itself handles the software limits
                 writeRegister(REG_TARGET_TORQUE, currentTargetTorque);
             }
+            // (If servoIsEnabledActual == false, disableServoModbus() already set torque to 0)
 
         } // end if(modbusOk)
          else {
@@ -1018,7 +1129,7 @@ void appLoop() {
     } // end if(homingState == HOMING_IDLE)
 
 
-    // 5. Daten an WebSocket Clients senden
+    // 5. Send data to WebSocket clients
     if (currentTime - lastWsSendTime >= wsSendInterval) {
         lastWsSendTime = currentTime;
         if (ws.count() > 0) {
@@ -1033,8 +1144,8 @@ void appLoop() {
             wsJsonTx["trq"] = actualTorque;
             wsJsonTx["cur"] = rmsCurrent;
             wsJsonTx["vbus"] = busVoltage;
-            wsJsonTx["igbtTemp"] = igbtTemp;     // *** NEU ***
-            wsJsonTx["motorTemp"] = motorTemp;   // *** NEU ***
+            wsJsonTx["igbtTemp"] = igbtTemp;     
+            wsJsonTx["motorTemp"] = motorTemp;   
             wsJsonTx["homingInProgress"] = (homingState != HOMING_IDLE); 
             { String jsonString; serializeJson(wsJsonTx, jsonString); ws.textAll(jsonString); }
         }
@@ -1043,7 +1154,7 @@ void appLoop() {
     ws.cleanupClients();
 }
 
-// --- Haupt-Loop ---
+// --- Main Loop ---
 void loop() {
     if (isInAPMode) {
         delay(10); // AP Mode does very little in loop
@@ -1070,7 +1181,7 @@ void loop() {
             servoIsEnabledActual = false;
             servoIsEnabledTarget = false;
             enableCmdSent = false; // Reset flag on disconnect
-            homingState = HOMING_IDLE; // Homing bei WLAN-Verlust abbrechen
+            homingState = HOMING_IDLE; // Abort homing on WiFi loss
             logToBrowser("WiFi lost, Modbus communication stopped.");
         }
         delay(500); // Wait between checks
