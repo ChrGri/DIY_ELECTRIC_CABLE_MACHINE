@@ -144,7 +144,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     .control-group { margin-bottom: 20px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type=range] { width: 100%; }
-    .value-display { font-size: 1.2em; color: #007bff; text-align: center; margin-top: 5px; }
+    .value-display { font-size: 1.2em; color: #007bff; text-align: center; margin-top: 10px; }
     .btn { padding: 10px 15px; font-size: 1em; cursor: pointer; border: none; border-radius: 5px; margin-right: 10px; }
     .btn-enable { background-color: #28a745; color: white; }
     .btn-disable { background-color: #dc3545; color: white; }
@@ -170,15 +170,34 @@ const char index_html[] PROGMEM = R"rawliteral(
     .di-off { background-color: lightgrey; }
     #logOutput { width: 98%; height: 150px; background-color: #333; color: #fff; font-family: monospace; font-size: 0.8em; border: 1px solid #ccc; border-radius: 4px; margin-top: 15px; overflow-y: scroll; padding: 5px; }
     .chart-container { margin-top: 30px; height: 250px; } 
+
+    /* --- NEW STYLES --- */
+    .slider-wrapper { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+    .slider-wrapper input[type=range] { flex: 1; margin: 0; } /* Let it grow, remove default margins */
+    .btn-inc { 
+      background-color: #6c757d; /* Grey */
+      color: white; 
+      width: 60px; /* Fixed width */
+      flex-shrink: 0; /* Don't shrink */
+      margin: 0; /* Override .btn margin */
+      padding: 8px 10px; /* Adjust padding */
+      font-size: 0.9em;
+    }
+    /* --- END NEW STYLES --- */
+
   </style>
 </head>
 <body>
   <div class="container">
     <h2>A6-RS Servo Control</h2>
+    
     <div class="control-group">
-      <!-- *** LABEL, RANGE, STEP, VALUE changed *** -->
       <label for="weightSlider">Target Weight (kg):</label> 
-      <input type="range" id="weightSlider" min="0" max="120" value="0" step="1"> <!-- 0 to 12.0 kg -->
+      <div class="slider-wrapper"> <button id="minus5Btn" class="btn btn-inc">-5kg</button>
+        <button id="minus1Btn" class="btn btn-inc">-1kg</button>
+        <input type="range" id="weightSlider" min="0" max="120" value="0" step="1"> <button id="plus1Btn" class="btn btn-inc">+1kg</button>
+        <button id="plus5Btn" class="btn btn-inc">+5kg</button>
+      </div>
       <div id="weightValue" class="value-display">0.0 kg</div>
     </div>
     <div class="control-group">
@@ -201,30 +220,28 @@ const char index_html[] PROGMEM = R"rawliteral(
       <p>IGBT Temp: <strong id="igbtTemp">0.0</strong> &deg;C</p>
       <p>Motor Temp: <strong id="motorTemp">0.0</strong> &deg;C</p>
       <p>DIs (1-8):
-         <span id="di1" class="di-indicator di-off"></span> <span id="di2" class="di-indicator di-off"></span>
-         <span id="di3" class="di-indicator di-off"></span> <span id="di4" class="di-indicator di-off"></span>
-         <span id="di5" class="di-indicator di-off"></span> <span id="di6" class="di-indicator di-off"></span>
-         <span id="di7" class="di-indicator di-off"></span> <span id="di8" class="di-indicator di-off"></span>
-         (<span id="diValueHex">0x00</span>)
+          <span id="di1" class="di-indicator di-off"></span> <span id="di2" class="di-indicator di-off"></span>
+          <span id="di3" class="di-indicator di-off"></span> <span id="di4" class="di-indicator di-off"></span>
+          <span id="di5" class="di-indicator di-off"></span> <span id="di6" class="di-indicator di-off"></span>
+          <span id="di7" class="di-indicator di-off"></span> <span id="di8" class="di-indicator di-off"></span>
+          (<span id="diValueHex">0x00</span>)
       </p>
     </div>
 
-     <!-- Two Chart Canvases -->
-     <div class="chart-container">
+      <div class="chart-container">
         <h4>Position</h4>
         <canvas id="posChart"></canvas>
-     </div>
-      <div class="chart-container">
+      </div>
+       <div class="chart-container">
         <h4>Bus Voltage</h4>
         <canvas id="voltChart"></canvas>
-     </div>
+      </div>
 
-     <textarea id="logOutput" readonly></textarea>
+      <textarea id="logOutput" readonly></textarea>
   </div>
 <script>
   var gateway = `ws://${window.location.hostname}/ws`;
   var websocket;
-  // var targetTorque = 0; // No longer directly used by slider
   var servoTargetState = false; 
   var logTextArea = null;
   const MAX_LOG_LINES = 100;
@@ -252,6 +269,14 @@ const char index_html[] PROGMEM = R"rawliteral(
   function initUI() {
     document.getElementById('weightSlider').addEventListener('input', onSliderInput); // Changed ID
     document.getElementById('weightSlider').addEventListener('change', onSliderChange); // Changed ID
+    
+    // *** NEW BUTTON LISTENERS ***
+    document.getElementById('minus5Btn').addEventListener('click', onMinus5Click);
+    document.getElementById('minus1Btn').addEventListener('click', onMinus1Click);
+    document.getElementById('plus1Btn').addEventListener('click', onPlus1Click);
+    document.getElementById('plus5Btn').addEventListener('click', onPlus5Click);
+    // *** END NEW LISTENERS ***
+
     document.getElementById('enableBtn').addEventListener('click', onEnableClick);
     document.getElementById('disableBtn').addEventListener('click', onDisableClick);
     document.getElementById('homeBtn').addEventListener('click', onHomeClick);
@@ -373,7 +398,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         updateButtonStates(isActuallyEnabled, homingInProgress);
 
         let diVal = data.diStatus;
-        document.getElementById('diValueHex').textContent = '0x' + diVal.toString(16).padStart(2, '0');
+        document.getElementById('diValueHex').textContent = '0x' + diVal.toString(16).padStart(4, '0'); // Padded to 4 for 0xFFFF
         for (let i = 1; i <= 8; i++) {
             let indicator = document.getElementById('di' + i);
             indicator.className = ((diVal >> (i - 1)) & 1) ? 'di-indicator di-on' : 'di-indicator di-off';
@@ -389,26 +414,61 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
   }
 
-  // *** UPDATED: Slider controls weight ***
+  // *** REFACTORED Slider/Button functions ***
+
+  // onSliderInput: Update UI only, don't send command (prevents flooding)
   function onSliderInput(event) {
-    let sliderValue = parseInt(event.target.value); // 0-120
-    let targetWeightKg = sliderValue / 10.0; // 0.0 - 12.0 kg
-    document.getElementById('weightValue').textContent = targetWeightKg.toFixed(1) + ' kg';
+    updateWeight(event.target.value, false); 
   }
 
- // *** UPDATED: Slider sends calculated torque ***
- function onSliderChange(event) {
-    let sliderValue = parseInt(event.target.value); // 0-120
-    let targetWeightKg = sliderValue / 10.0; // 0.0 - 12.0 kg
+  // onSliderChange: Update UI AND send command (fires on mouse release)
+  function onSliderChange(event) {
+    updateWeight(event.target.value, true);
+  }
+
+  // NEW Central function to update weight from slider or buttons
+  function updateWeight(newSliderValue, sendUpdate = true) {
+    // 1. Constrain value (slider is 0-120)
+    newSliderValue = Math.max(0, Math.min(120, parseInt(newSliderValue)));
+    
+    // 2. Update the slider's visual position
+    document.getElementById('weightSlider').value = newSliderValue;
+    
+    // 3. Update the text display
+    let targetWeightKg = newSliderValue / 10.0; // 0.0 - 12.0 kg
     document.getElementById('weightValue').textContent = targetWeightKg.toFixed(1) + ' kg';
 
-    // Convert kg back to Modbus torque value (0-2000)
-    let modbusTorqueValue = Math.round(targetWeightKg * KG_TO_MODBUS_FACTOR);
-    modbusTorqueValue = Math.max(0, Math.min(2000, modbusTorqueValue)); // Constrain to 0-2000
+    // 4. If triggered by 'change' event or button, send the update
+    if (sendUpdate) {
+      // Convert kg back to Modbus torque value (0-2000)
+      let modbusTorqueValue = Math.round(targetWeightKg * KG_TO_MODBUS_FACTOR);
+      modbusTorqueValue = Math.max(0, Math.min(2000, modbusTorqueValue)); // Constrain to 0-2000
 
-    logToConsole("Slider Change - Target Weight: " + targetWeightKg.toFixed(1) + " kg -> Sending Modbus Torque: " + modbusTorqueValue); 
-    websocket.send(JSON.stringify({command: 'setTorque', value: modbusTorqueValue}));
- }
+      logToConsole("Slider/Button - Target Weight: " + targetWeightKg.toFixed(1) + " kg -> Sending Modbus Torque: " + modbusTorqueValue); 
+      websocket.send(JSON.stringify({command: 'setTorque', value: modbusTorqueValue}));
+    }
+  }
+
+  // NEW Button Handlers
+  function onMinus5Click() {
+    let currentVal = parseInt(document.getElementById('weightSlider').value);
+    updateWeight(currentVal - 50, true); // -5kg = -50 on slider
+  }
+  function onMinus1Click() {
+    let currentVal = parseInt(document.getElementById('weightSlider').value);
+    updateWeight(currentVal - 10, true); // -1kg = -10 on slider
+  }
+  function onPlus1Click() {
+    let currentVal = parseInt(document.getElementById('weightSlider').value);
+    updateWeight(currentVal + 10, true); // +1kg = +10 on slider
+  }
+  function onPlus5Click() {
+    let currentVal = parseInt(document.getElementById('weightSlider').value);
+    updateWeight(currentVal + 50, true); // +5kg = +50 on slider
+  }
+
+  // *** END REFACTORED/NEW functions ***
+
 
   function onEnableClick(event) {
     logToConsole("Enable Button Clicked - Requesting Servo Enable");
@@ -421,9 +481,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     servoTargetState = false;
     websocket.send(JSON.stringify({command: 'disableServo'}));
     // Reset slider and send 0 torque (which corresponds to 0 kg)
-    document.getElementById('weightSlider').value = 0;
-    document.getElementById('weightValue').textContent = '0.0 kg';
-    websocket.send(JSON.stringify({command: 'setTorque', value: 0}));
+    updateWeight(0, true); // Use new function to set to 0 and send update
   }
   
   function onHomeClick(event) {
@@ -437,24 +495,23 @@ const char index_html[] PROGMEM = R"rawliteral(
     logToConsole("!!! EMERGENCY STOP Clicked !!!");
     servoTargetState = false;
     // Reset slider and send 0 torque
-    document.getElementById('weightSlider').value = 0;
-    document.getElementById('weightValue').textContent = '0.0 kg';
-    websocket.send(JSON.stringify({command: 'eStop'})); // eStop command handles sending 0 torque
+    updateWeight(0, true); // Use new function to set to 0 and send update
+    websocket.send(JSON.stringify({command: 'eStop'})); // eStop command handles immediate disable
   }
 
   function updateButtonStates(isServoActuallyEnabled, homingInProgress) {
-     let modbusIsOk = document.getElementById('modbusStatus').textContent === 'OK';
+      let modbusIsOk = document.getElementById('modbusStatus').textContent === 'OK';
 
-     document.getElementById('enableBtn').disabled = isServoActuallyEnabled || homingInProgress;
-     document.getElementById('enableBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || homingInProgress);
-     document.getElementById('disableBtn').disabled = !isServoActuallyEnabled || homingInProgress;
-     document.getElementById('disableBtn').classList.toggle('btn-disabled', !isServoActuallyEnabled || homingInProgress);
-     
-     document.getElementById('homeBtn').disabled = isServoActuallyEnabled || !modbusIsOk || homingInProgress;
-     document.getElementById('homeBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || !modbusIsOk || homingInProgress);
+      document.getElementById('enableBtn').disabled = isServoActuallyEnabled || homingInProgress;
+      document.getElementById('enableBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || homingInProgress);
+      document.getElementById('disableBtn').disabled = !isServoActuallyEnabled || homingInProgress;
+      document.getElementById('disableBtn').classList.toggle('btn-disabled', !isServoActuallyEnabled || homingInProgress);
+      
+      document.getElementById('homeBtn').disabled = isServoActuallyEnabled || !modbusIsOk || homingInProgress;
+      document.getElementById('homeBtn').classList.toggle('btn-disabled', isServoActuallyEnabled || !modbusIsOk || homingInProgress);
 
-     document.getElementById('estopBtn').disabled = !modbusIsOk;
-     document.getElementById('estopBtn').classList.toggle('btn-disabled', !modbusIsOk);
+      document.getElementById('estopBtn').disabled = !modbusIsOk;
+      document.getElementById('estopBtn').classList.toggle('btn-disabled', !modbusIsOk);
   }
 
 </script>
