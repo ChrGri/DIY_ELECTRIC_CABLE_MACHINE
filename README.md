@@ -29,8 +29,8 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 - Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
 - Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
 - controller via web interface --> 
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/b3decf32-4f61-4d17-a9bc-2b21e9cfe277" />
-
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/0c006049-d826-4bcd-adf9-d415939f2db4" />
+- maximum force 12kg with the small A6 1.27Nm servo in direct drive, so no gearing. The larger 3.18 Nm might be able to provide 30 kg. 
 
 
 
