@@ -28,8 +28,8 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 - Fully Open-Source: All 3D models (STL/STEP) and firmware code are provided.
 - Cost-Effective: Built for a fraction of the cost of commercial smart gyms.
 - Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
-- controller via web interface --> 
-<img width="300" alt="image" src="https://github.com/user-attachments/assets/0c006049-d826-4bcd-adf9-d415939f2db4" />
+- controller via web interface --> <br>
+<img width="300" alt="image" src="https://github.com/user-attachments/assets/0c006049-d826-4bcd-adf9-d415939f2db4" /> <br>
 - maximum force 12kg with the small A6 1.27Nm servo in direct drive, so no gearing. The larger 3.18 Nm might be able to provide 30 kg. 
 
 
@@ -50,7 +50,7 @@ Core Components
 | Microcontroller | ESP32 S3 dev board |  | [Amazon](https://amzn.to/48NTnuW) |
 | RJ45  cable |  | | [Amazon](https://amzn.to/47rE3Si) |
 | TTL to Modbus converter |  |  | [Amazon](https://amzn.to/4nr72vo) |
-| Servo Motor | StepperOnline A6 Servo | e.g., A6-750W or similar. Choose based on desired power. | [A6 1,27Nm](https://www.omc-stepperonline.com/de/a6-serie-400w-rs485-ac-servomotor-kit-3000rpm-1-27nm-17-bit-absolutwertgeber-ip67-a6-rs400h2a1-m17?tracking=6721c5865911c)
+| Servo Motor | StepperOnline A6 Servo | | [A6 1,27Nm](https://www.omc-stepperonline.com/de/a6-serie-400w-rs485-ac-servomotor-kit-3000rpm-1-27nm-17-bit-absolutwertgeber-ip67-a6-rs400h2a1-m17?tracking=6721c5865911c) or [A6 3,18Nm](https://www.omc-stepperonline.com/de/a6-serie-1000w-rs485-ac-servomotor-kit-3000rpm-3-18nm-17-bit-absolutwertgeber-ip67-a6-rs1000h2a1-m17?tracking=6721c5865911c)|
 | Gym Cable | 3mm Polyster cord x 30m | Polyster cord is strong. | [Polyster cord](https://amzn.to/49fXEY2) |
 | Handle | Standard D-Handle | Any cable machine attachment works. |  |
 
