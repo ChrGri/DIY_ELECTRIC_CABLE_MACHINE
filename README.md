@@ -11,6 +11,9 @@ An open-source, smart digital resistance machine using an ESP32, a high-torque S
 Action video, see [here](Doc/Videos/ActionVideo_1.mp4).
 
 
+The machine can be parameterized via web interface see <br>
+<img width="800" alt="image" src="Doc/Images/WebinterfaceDemo1.gif" />
+
 # 🏋️ About The Project
 
 This project is a Do-It-Yourself (DIY) approach to modern smart gyms. Instead of using a traditional weight stack, this machine uses a powerful closed-loop servo motor (StepperOnline A6) controlled by an ESP32 to provide resistance. This allows for digitally adjustable weight, smooth operation, and the potential for advanced features like eccentric-only training, custom resistance curves, and workout tracking.
@@ -27,6 +30,8 @@ The core of the build relies on accessible components: the powerful ESP32, a rel
 - Customizable: Modify the code to add new modes (eccentric, isometric, chains) or integrate with other fitness apps.
 - controller via web interface --> 
 <img width="300" alt="image" src="https://github.com/user-attachments/assets/b3decf32-4f61-4d17-a9bc-2b21e9cfe277" />
+
+
 
 
 # Support the team
@@ -127,15 +132,7 @@ Install [PlatformIO](https://platformio.org/install/ide?install=vscode) in Visua
 
 [ ] Read servo alarms
 
-[ ] Plot position over time
-
-[ ] Convert torque to weight
-
 [ ] Add eccentric resistance mode (higher resistance on release).
-
-[ ] Implement a BLE (Bluetooth Low Energy) service for a mobile app.
-
-[ ] Add a load cell to measure force accurately and provide real-time feedback.
 
 [ ] Workout tracking and history.
 
