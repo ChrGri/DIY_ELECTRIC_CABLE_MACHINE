@@ -47,7 +47,7 @@ HardwareSerial ModbusSerial(2);
 #define REG_OUT_OF_CONTROL_PROT 0x0620 // C06.20 (Out of Control Protection Mode)
 #define REG_SPEED_FEEDBACK 0x4001      // U40.01
 #define REG_TORQUE_FEEDBACK 0x4003     // U40.03
-#define REG_DI_STATUS 0x0404           // C04.04 according to doc, but seems U40.04 in practice? Using 0x4004 for now.
+#define REG_DI_STATUS 0x04004          // C040.04
 #define REG_BUS_VOLTAGE 0x4006         // U40.06
 #define REG_RMS_CURRENT 0x400C         // U40.0C
 #define REG_POSITION_FEEDBACK_L 0x4016 // U40.16 (Low)
