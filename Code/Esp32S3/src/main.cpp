@@ -3,11 +3,12 @@
  *
  * Implements a simple WiFi Manager, Modbus control, WebSocket interface,
  * and sends log messages/status data to the web browser via WebSocket.
- * Includes two live charts (Position/Time, Voltage/Time) using Chart.js.
+ * Includes three live charts (Position/Time, Voltage/Time, Speed/Time) using Chart.js.
  *
  * *** MODIFIED ***
  * - Changed slider to represent and control Target Weight (kg) instead of Max Torque (%).
  * - Calculated conversion factor based on provided servo specs.
+ * - Added third chart for Speed (rpm).
  */
 
 #include <WiFi.h>
@@ -236,7 +237,11 @@ const char index_html[] PROGMEM = R"rawliteral(
         <h4>Bus Voltage</h4>
         <canvas id="voltChart"></canvas>
       </div>
-
+       
+      <div class="chart-container">
+        <h4>Geschwindigkeit</h4>
+        <canvas id="spdChart"></canvas>
+      </div>
       <textarea id="logOutput" readonly></textarea>
   </div>
 <script>
@@ -246,12 +251,16 @@ const char index_html[] PROGMEM = R"rawliteral(
   var logTextArea = null;
   const MAX_LOG_LINES = 100;
 
-  // Chart Variables (unchanged)
+  // Chart Variables
   var posChart = null;
   var voltChart = null;
+  var spdChart = null; // --- NEU ---
   var commonLabels = []; 
   var posChartData = { labels: commonLabels, datasets: [{ label: 'Position (Steps)', data: [], borderColor: 'rgb(75, 192, 192)', backgroundColor: 'rgba(75, 192, 192, 0.5)', tension: 0.1 }] };
   var voltChartData = { labels: commonLabels, datasets: [{ label: 'Bus Voltage (V)', data: [], borderColor: 'rgb(255, 99, 132)', backgroundColor: 'rgba(255, 99, 132, 0.5)', tension: 0.1 }] };
+  // --- NEU ---
+  var spdChartData = { labels: commonLabels, datasets: [{ label: 'Geschwindigkeit (rpm)', data: [], borderColor: 'rgb(54, 162, 235)', backgroundColor: 'rgba(54, 162, 235, 0.5)', tension: 0.1 }] };
+  // --- ENDE NEU ---
   const TIME_WINDOW_MS = 20000; // 20 seconds
 
   // *** NEW: Conversion factor ***
@@ -284,7 +293,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     updateButtonStates(false, false); 
   }
 
-  // Initializes BOTH Charts (unchanged)
+  // Initializes Charts
   function initCharts() {
     const posCtx = document.getElementById('posChart').getContext('2d');
     posChart = new Chart(posCtx, {
@@ -294,22 +303,33 @@ const char index_html[] PROGMEM = R"rawliteral(
     voltChart = new Chart(voltCtx, {
         type: 'line', data: voltChartData, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } }, y: { title: { display: true, text: 'Bus Voltage (V)' }, suggestedMin: 0, suggestedMax: 400 } }, plugins: { legend: { display: false }, title: { display: false } } }
     });
+    
+    // --- NEU --- Initialisierung für Speed Chart
+    const spdCtx = document.getElementById('spdChart').getContext('2d');
+    spdChart = new Chart(spdCtx, {
+        type: 'line', data: spdChartData, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'time', time: { unit: 'second', tooltipFormat: 'HH:mm:ss', displayFormats: { second: 'HH:mm:ss' } }, title: { display: true, text: 'Time' } }, y: { title: { display: true, text: 'Geschwindigkeit (rpm)' } } }, plugins: { legend: { display: false }, title: { display: false } } }
+    });
+    // --- ENDE NEU ---
   }
 
-  // Adds data to BOTH charts and enforces time window (unchanged)
-  function addDataToCharts(timestamp, position, voltage) {
-    if (!posChart || !voltChart) return;
+  // --- MODIFIZIERT --- Adds data to ALL charts and enforces time window
+  function addDataToCharts(timestamp, position, voltage, speed) {
+    if (!posChart || !voltChart || !spdChart) return; // spdChart-Check hinzugefügt
     commonLabels.push(timestamp);
     posChartData.datasets[0].data.push(position); 
     voltChartData.datasets[0].data.push(voltage);
+    spdChartData.datasets[0].data.push(speed); // NEU
+    
     const now = Date.now();
     while (commonLabels.length > 0 && (now - commonLabels[0] > TIME_WINDOW_MS)) {
         commonLabels.shift(); 
         posChartData.datasets[0].data.shift(); 
         voltChartData.datasets[0].data.shift(); 
+        spdChartData.datasets[0].data.shift(); // NEU
     }
     posChart.update('none'); 
     voltChart.update('none'); 
+    spdChart.update('none'); // NEU
   }
 
   function initWebSocket() {
@@ -404,8 +424,8 @@ const char index_html[] PROGMEM = R"rawliteral(
             indicator.className = ((diVal >> (i - 1)) & 1) ? 'di-indicator di-on' : 'di-indicator di-off';
         }
 
-        // Update charts with new data
-        addDataToCharts(Date.now(), data.pos, data.vbus / 10.0);
+        // --- MODIFIZIERT --- Update charts with new data, including speed
+        addDataToCharts(Date.now(), data.pos, data.vbus / 10.0, data.spd);
 
       }
     } catch (e) {
@@ -1213,4 +1233,3 @@ void loop() {
         delay(500); // Wait between checks
     }
 }
-
