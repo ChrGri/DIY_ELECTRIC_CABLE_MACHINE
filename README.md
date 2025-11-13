@@ -2,14 +2,15 @@
 
 An open-source, smart digital resistance machine using an ESP32, a high-torque StepperOnline A6 servo, and 3D-printed components. 
 
-<img width="748" height="993" alt="image" src="https://github.com/user-attachments/assets/911381d6-aee3-4775-b78f-ad645e522a1c" />
-
-<img width="1319" height="993" alt="image" src="https://github.com/user-attachments/assets/f03fdc0b-d693-4f28-ae2a-7654bda9b814" />
+<img width="748" height="993" alt="image" src="Doc/Images/PXL_20251113_044520086.jpg" />
 
 <img width="1319" height="993" alt="image" src="Doc/Images/First_Usage.gif" />
 
-Action video, see [here](Doc/Videos/ActionVideo_1.mp4).
+<img width="1319" height="993" alt="image" src="Doc/Images/RollerMechnism.gif" />
 
+<img width="1319" height="993" alt="image" src="Doc/Images/Homing.gif" />
+
+Action video, see [here](Doc/Videos/ActionVideo_1.mp4) and [here](Doc/Videos/ActionVideo_2.mp4).
 
 The machine can be parameterized via web interface see <br>
 <img width="800" alt="image" src="Doc/Images/WebinterfaceDemo1.gif" />
