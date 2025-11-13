@@ -4,11 +4,12 @@ An open-source, smart digital resistance machine using an ESP32, a high-torque S
 
 <img width="748" height="993" alt="image" src="Doc/Images/PXL_20251113_044520086.jpg" />
 
-<img width="1319" height="993" alt="image" src="Doc/Images/First_Usage.gif" />
+<img width="1319" height="993" alt="image" src="Doc/Images/Second_Usage.gif" />
 
 <img width="1319" height="993" alt="image" src="Doc/Images/RollerMechnism.gif" />
 
 <img width="1319" height="993" alt="image" src="Doc/Images/Homing.gif" />
+
 
 Action video, see [here](Doc/Videos/ActionVideo_1.mp4) and [here](Doc/Videos/ActionVideo_2.mp4).
 
